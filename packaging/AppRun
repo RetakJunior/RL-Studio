@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -e
+
+# ==============================================================================
+# RL Studio - Standalone Linux AppRun Entrypoint
+# ==============================================================================
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+export APPDIR="${HERE}"
+
+# 1. Setup Custom Splash Screen & Clean Overlays in /tmp
+if [ -f "${HERE}/usr/share/krita/pics/splash.png" ]; then
+    cp -f "${HERE}/usr/share/krita/pics/splash.png" /tmp/s0.png 2>/dev/null || true
+fi
+
+# Clean 0x0 empty SVGs to replace old banner and branding overlays
+cat > /tmp/s1.svg << 'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"/>
+EOF
+
+cat > /tmp/s2.svg << 'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"/>
+EOF
+
+chmod 644 /tmp/s0.png /tmp/s1.svg /tmp/s2.svg 2>/dev/null || true
+
+# 2. Setup Library and Binary Paths
+export PATH="${HERE}/usr/bin:${PATH}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+
+# 3. Load Pure Qt5 Title & URL Redirection Hook
+HOOK_LIB="${HERE}/usr/lib/x86_64-linux-gnu/librlstudio_hook.so"
+if [ -f "${HOOK_LIB}" ]; then
+    export LD_PRELOAD="${HOOK_LIB}${LD_PRELOAD:+:${LD_PRELOAD}}"
+fi
+
+# 4. Qt 5 Plugin paths (STRICTLY Qt 5 - never Qt 6 to prevent ABI crashes)
+export QT_PLUGIN_PATH="${HERE}/usr/plugins:${HERE}/usr/lib/x86_64-linux-gnu/qt5/plugins:${QT_PLUGIN_PATH:-}"
+export QT_QPA_PLATFORM_PLUGIN_PATH="${HERE}/usr/plugins/platforms:${HERE}/usr/lib/x86_64-linux-gnu/qt5/plugins/platforms:${QT_QPA_PLATFORM_PLUGIN_PATH:-}"
+export QML2_IMPORT_PATH="${HERE}/usr/lib/x86_64-linux-gnu/qt5/qml:${QML2_IMPORT_PATH:-}"
+
+# 5. Resource & Config Dirs
+export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_CONFIG_DIRS="${HERE}/usr/etc/xdg:${XDG_CONFIG_DIRS:-/etc/xdg}"
+export KRITA_PLUGIN_PATH="${HERE}/usr/lib/x86_64-linux-gnu/kritaplugins:${KRITA_PLUGIN_PATH:-}"
+
+# 6. Tablet & Input Acceleration
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+    export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+else
+    export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+    export QT_XCB_TABLET_USE_XINPUT22=1
+fi
+
+# HiDPI Scaling
+export QT_ENABLE_HIGHDPI_SCALING=1
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+
+# 7. Execute Application
+if [ -x "${HERE}/usr/bin/rlstudio" ]; then
+    exec "${HERE}/usr/bin/rlstudio" "$@"
+elif [ -x "${HERE}/usr/bin/krita" ]; then
+    exec "${HERE}/usr/bin/krita" "$@"
+else
+    echo "RL Studio binary not found!" >&2
+    exit 1
+fi

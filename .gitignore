@@ -1,0 +1,23 @@
+# Build & Packaging Artefacts
+dist/
+RetakAlium.AppDir/
+*.AppImage
+*.sfs
+*.iso
+
+# Upstream Source & Intermediate Builds
+krita/
+build/
+*.o
+*.so
+*.a
+
+# Python & Cache
+__pycache__/
+*.pyc
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

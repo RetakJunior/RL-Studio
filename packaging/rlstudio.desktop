@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=RL Studio
+GenericName=Digital Painting & Illustration Studio
+GenericName[tr]=Dijital Çizim ve İllüstrasyon Stüdyosu
+Comment=Professional creative painting, concept art and illustration studio
+Comment[tr]=Profesyonel dijital çizim, konsept tasarım ve illüstrasyon stüdyosu
+Exec=rlstudio %F
+Icon=rlstudio
+Type=Application
+StartupNotify=true
+StartupWMClass=rlstudio
+Categories=Graphics;2DGraphics;RasterGraphics;Qt;KDE;
+MimeType=application/x-krita;application/x-rlstudio;image/openraster;image/png;image/jpeg;image/x-psd;image/tiff;
+Terminal=false
