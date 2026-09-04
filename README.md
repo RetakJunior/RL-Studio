@@ -36,3 +36,5 @@
 ```bash
 ./packaging/build-appimage.sh
 ```
+<hr> 
+Thanks Krita :)
