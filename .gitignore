@@ -1,24 +1,42 @@
-# Build & Packaging Artefacts
+# ==============================================================================
+# RL Studio - Git Ignore Rules
+# ==============================================================================
+
+# Application Packages & AppImages
 dist/
 RetakAlium.AppDir/
 *.AppImage
 *.sfs
 *.iso
 
-# Upstream Source & Intermediate Builds
+# Python Packaging & Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+pypi_package/dist/
+pypi_package/build/
+pypi_package/src/*.egg-info/
+.venv/
+venv/
+
+# Upstream Source & C++/CMake Build Files
 krita/
 build/
 *.o
+*.obj
 *.so
+*.so.*
+*.dylib
+*.dll
 *.a
+*.lib
 
-# Python & Cache
-__pycache__/
-*.pyc
-
-# IDE & OS
+# Temporary & Editor Files
 .vscode/
 .idea/
-.DS_Store
 *.swp
-
+*~
+.DS_Store
+*.log
+/tmp/
