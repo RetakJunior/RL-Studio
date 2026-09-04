@@ -5,9 +5,13 @@
 #include <QGuiApplication>
 #include <QUrl>
 #include <QDesktopServices>
+#include <QIcon>
+#include <QPixmap>
+#include <QFile>
 
 namespace
 {
+
     QString cleanTitle(QString t)
     {
         if (t.isEmpty())
@@ -17,6 +21,34 @@ namespace
         t.replace("krita", "rlstudio");
         return t;
     }
+
+    QIcon getRLIcon()
+    {
+        static QIcon cachedIcon;
+        if (!cachedIcon.isNull())
+            return cachedIcon;
+
+        const char *appdir = getenv("APPDIR");
+        QStringList candidates;
+        if (appdir)
+        {
+            candidates << QString(appdir) + "/usr/share/icons/hicolor/256x256/apps/rlstudio.png";
+            candidates << QString(appdir) + "/rlstudio.png";
+        }
+        candidates << QStringLiteral("/home/retak/Şablonlar/RetakAlium Studio/logos/logo.png");
+        candidates << QStringLiteral("/tmp/rlstudio_icon.png");
+
+        for (const QString &path : candidates)
+        {
+            if (QFile::exists(path))
+            {
+                cachedIcon = QIcon(path);
+                break;
+            }
+        }
+        return cachedIcon;
+    }
+
 } // namespace
 
 // 1. Hook QWidget::setWindowTitle to change all window & dialog titles
@@ -36,7 +68,28 @@ extern "C" void _ZN7QWidget14setWindowTitleERK7QString(QWidget *self, const QStr
     }
 }
 
-// 2. Hook QGuiApplication::setApplicationDisplayName
+// 2. Hook QWidget::setWindowIcon to ensure canvas/subwindow/dialogs use RL Studio icon
+typedef void (*SetWindowIconFn)(QWidget *, const QIcon &);
+static SetWindowIconFn orig_setWindowIcon = nullptr;
+
+extern "C" void _ZN7QWidget13setWindowIconERK5QIcon(QWidget *self, const QIcon &icon)
+{
+    if (!orig_setWindowIcon)
+    {
+        orig_setWindowIcon = (SetWindowIconFn)dlsym(RTLD_NEXT, "_ZN7QWidget13setWindowIconERK5QIcon");
+    }
+    QIcon rl = getRLIcon();
+    if (!rl.isNull())
+    {
+        if (orig_setWindowIcon)
+            orig_setWindowIcon(self, rl);
+        return;
+    }
+    if (orig_setWindowIcon)
+        orig_setWindowIcon(self, icon);
+}
+
+// 3. Hook QGuiApplication::setApplicationDisplayName
 typedef void (*SetAppDisplayNameFn)(const QString &);
 static SetAppDisplayNameFn orig_setAppDisplayName = nullptr;
 
@@ -53,7 +106,7 @@ extern "C" void _ZN15QGuiApplication25setApplicationDisplayNameERK7QString(const
     }
 }
 
-// 3. Hook QDesktopServices::openUrl to redirect RLStudio Web and Krita links to GitHub
+// 4. Hook QDesktopServices::openUrl to redirect RLStudio Web and Krita links to GitHub
 typedef bool (*OpenUrlFn)(const QUrl &);
 static OpenUrlFn orig_openUrl = nullptr;
 
@@ -73,13 +126,13 @@ extern "C" bool _ZN16QDesktopServices7openUrlERK4QUrl(const QUrl &url)
     return orig_openUrl ? orig_openUrl(url) : false;
 }
 
-// 4. Hook KAboutData::displayName
+// 5. Hook KAboutData::displayName
 extern "C" QString _ZNK10KAboutData11displayNameEv(const void * /*self*/)
 {
     return QStringLiteral("RLStudio");
 }
 
-// 5. Hook KAboutData::productName
+// 6. Hook KAboutData::productName
 extern "C" QString _ZNK10KAboutData11productNameEv(const void * /*self*/)
 {
     return QStringLiteral("RLStudio");

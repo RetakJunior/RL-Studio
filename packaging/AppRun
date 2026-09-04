@@ -8,27 +8,45 @@ set -e
 HERE="$(dirname "$(readlink -f "${0}")")"
 export APPDIR="${HERE}"
 
-# 1. Setup Custom Splash Screen & Clean Overlays in /tmp
+# 1. Setup Custom Splash Screen & Vector Overlays in /tmp
 if [ -f "${HERE}/usr/share/krita/pics/splash.png" ]; then
     cp -f "${HERE}/usr/share/krita/pics/splash.png" /tmp/s0.png 2>/dev/null || true
 fi
 
-# Clean 0x0 empty SVGs to replace old banner and branding overlays
+# Banner: clean 1x1 empty SVG
 cat > /tmp/s1.svg << 'EOF'
 <svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"/>
 EOF
 
-cat > /tmp/s2.svg << 'EOF'
-<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"/>
-EOF
+# Branding: RL Studio vector icon
+if [ -f "${HERE}/usr/share/icons/hicolor/512x512/apps/rlstudio.png" ]; then
+    cp -f "${HERE}/usr/share/icons/hicolor/512x512/apps/rlstudio.png" /tmp/rlstudio_icon.png 2>/dev/null || true
+fi
 
-chmod 644 /tmp/s0.png /tmp/s1.svg /tmp/s2.svg 2>/dev/null || true
+if [ -f "${HERE}/usr/share/icons/hicolor/scalable/apps/rlstudio.svg" ]; then
+    cp -f "${HERE}/usr/share/icons/hicolor/scalable/apps/rlstudio.svg" /tmp/s2.svg 2>/dev/null || true
+else
+    cat > /tmp/s2.svg << 'EOF'
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="110" fill="#303841"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#76ABAE" stroke-width="10"/>
+  <rect x="130" y="120" width="50" height="272" rx="20" fill="#F5F5F5"/>
+  <rect x="130" y="120" width="180" height="130" rx="25" fill="#F5F5F5"/>
+  <rect x="180" y="160" width="90" height="50" rx="12" fill="#303841"/>
+  <polygon points="230,240 285,240 370,392 310,392" fill="#FF5722"/>
+  <circle cx="340" cy="140" r="45" fill="#76ABAE"/>
+  <polygon points="360,110 395,145 340,175" fill="#FF5722"/>
+</svg>
+EOF
+fi
+
+chmod 644 /tmp/s0.png /tmp/s1.svg /tmp/s2.svg /tmp/rlstudio_icon.png 2>/dev/null || true
 
 # 2. Setup Library and Binary Paths
 export PATH="${HERE}/usr/bin:${PATH}"
 export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
-# 3. Load Pure Qt5 Title & URL Redirection Hook
+# 3. Load Pure Qt5 Hook (Window Title, Canvas Icon, URL Redirection)
 HOOK_LIB="${HERE}/usr/lib/x86_64-linux-gnu/librlstudio_hook.so"
 if [ -f "${HOOK_LIB}" ]; then
     export LD_PRELOAD="${HOOK_LIB}${LD_PRELOAD:+:${LD_PRELOAD}}"

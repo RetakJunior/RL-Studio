@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 RL Studio - Binary Patching Engine
-Safely patches string resources inside the AppDir's copy of libkritaui.so:
-1. Redirects splash image to /tmp/s0.png
-2. Redirects banner and branding SVG overlays to empty /tmp/s1.svg and /tmp/s2.svg
-3. Updates artwork credit to 'RL Studio'
-4. Rebrands Welcome Page links ('Support RLSt', 'RLStudio Web')
-5. Rebrands footer text to RL Studio
+1. libkritaui.so:
+   - Redirects splash image to /tmp/s0.png
+   - Redirects banner to /tmp/s1.svg and branding SVG to /tmp/s2.svg (RL Studio vector logo)
+   - Updates artist credit to 'RL Studio'
+   - Rebrands Welcome Page links ('Support RLSt', 'RLStudio Web')
+   - Rebrands footer and news text to RL Studio
+2. kritakraexport.so:
+   - Changes default native export extension from 'kra' to 'rls'
+3. kritakraimport.so:
+   - Adds 'rls' to native import extensions ('rls, kra')
 """
 
 import os
@@ -26,14 +30,11 @@ def patch_libkritaui(so_path):
     old_splash = ":/splash/0.png".encode("utf-16le")
     idx_splash = data.find(old_splash)
     if idx_splash != -1:
-        # Update QStringData size (offset is 20 bytes before string data)
         size_offset = idx_splash - 20
-        struct.pack_into("<i", data, size_offset, 11)  # new size: 11 chars
+        struct.pack_into("<i", data, size_offset, 11)
         new_splash = "/tmp/s0.png\x00\x00\x00".encode("utf-16le")
         data[idx_splash:idx_splash+len(old_splash)] = new_splash
         print(f"  ✓ Patched Splash Image Path at {hex(idx_splash)}")
-    else:
-        print("  ! Splash image path not found")
 
     # 2. Patch Banner SVG (:/splash/banner.svg -> /tmp/s1.svg)
     old_banner = ":/splash/banner.svg".encode("utf-16le")
@@ -44,8 +45,6 @@ def patch_libkritaui(so_path):
         new_banner = ("/tmp/s1.svg" + "\x00" * (len(":/splash/banner.svg") - len("/tmp/s1.svg"))).encode("utf-16le")
         data[idx_banner:idx_banner+len(old_banner)] = new_banner
         print(f"  ✓ Patched Banner SVG Path at {hex(idx_banner)}")
-    else:
-        print("  ! Banner SVG path not found")
 
     # 3. Patch Branding SVG (:/krita-branding.svgz -> /tmp/s2.svg)
     old_brand = ":/krita-branding.svgz".encode("utf-16le")
@@ -56,8 +55,6 @@ def patch_libkritaui(so_path):
         new_brand = ("/tmp/s2.svg" + "\x00" * (len(":/krita-branding.svgz") - len("/tmp/s2.svg"))).encode("utf-16le")
         data[idx_brand:idx_brand+len(old_brand)] = new_brand
         print(f"  ✓ Patched Branding SVG Path at {hex(idx_brand)}")
-    else:
-        print("  ! Branding SVG path not found")
 
     # 4. Patch Artist Credit ('Tyson Tan' -> 'RL Studio')
     old_credit = "Tyson Tan".encode("utf-16le")
@@ -66,8 +63,6 @@ def patch_libkritaui(so_path):
         new_credit = "RL Studio".encode("utf-16le")
         data[idx_credit:idx_credit+len(old_credit)] = new_credit
         print(f"  ✓ Patched Artist Credit at {hex(idx_credit)}")
-    else:
-        print("  ! Artist credit not found")
 
     # 5. Patch Welcome Screen Links (Support Krita -> Support RLSt)
     idx_supp = data.find(b"Support Krita\x00")
@@ -97,14 +92,44 @@ def patch_libkritaui(so_path):
         print(f"  ✓ Patched News text at {hex(idx_news)}")
         idx_news = data.find(old_news, idx_news + len(old_news))
 
-    # Write patched library back
     with open(so_path, "wb") as f:
         f.write(data)
     print(f"[PATCH SUCCESS] {so_path} successfully modified!")
     return True
 
+def patch_plugins(appdir):
+    # 1. Patch Export extension (kra -> rls)
+    exp_path = os.path.join(appdir, "usr/lib/x86_64-linux-gnu/kritaplugins/kritakraexport.so")
+    if os.path.exists(exp_path):
+        with open(exp_path, "rb") as f:
+            d = bytearray(f.read())
+        idx = d.find(b"X-KDE-Extensionsckra")
+        if idx != -1:
+            d[idx+len("X-KDE-Extensionsc"):idx+len("X-KDE-Extensionsc")+3] = b"rls"
+            with open(exp_path, "wb") as f:
+                f.write(d)
+            print("  ✓ Patched kritakraexport.so default extension -> rls")
+
+    # 2. Patch Import extensions (kra, krz -> rls, kra)
+    imp_path = os.path.join(appdir, "usr/lib/x86_64-linux-gnu/kritaplugins/kritakraimport.so")
+    if os.path.exists(imp_path):
+        with open(imp_path, "rb") as f:
+            d = bytearray(f.read())
+        idx = d.find(b"X-KDE-Extensionshkra, krz")
+        if idx != -1:
+            d[idx+len("X-KDE-Extensionsh"):idx+len("X-KDE-Extensionsh")+8] = b"rls, kra"
+            with open(imp_path, "wb") as f:
+                f.write(d)
+            print("  ✓ Patched kritakraimport.so import extensions -> rls, kra")
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        patch_libkritaui(sys.argv[1])
-    else:
-        print("Usage: patch_binaries.py <path_to_libkritaui.so>")
+        target = sys.argv[1]
+        if target.endswith(".so") or target.endswith(".so.19") or target.endswith(".so.19.0.0"):
+            patch_libkritaui(target)
+        else:
+            # Assume appdir path
+            lib_candidate = os.path.join(target, "usr/lib/x86_64-linux-gnu/libkritaui.so.19.0.0")
+            if os.path.exists(lib_candidate):
+                patch_libkritaui(lib_candidate)
+            patch_plugins(target)

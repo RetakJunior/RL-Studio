@@ -18,13 +18,15 @@ mkdir -p "${APPDIR}/usr/lib/x86_64-linux-gnu/kritaplugins"
 mkdir -p "${APPDIR}/usr/share"
 mkdir -p "${APPDIR}/usr/share/applications"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
+mkdir -p "${APPDIR}/usr/share/mime/packages"
 mkdir -p "${DIST_DIR}"
 
 # 2. Generate Brand Assets
 echo "==> Generating brand assets..."
 python3 "${PACKAGING_DIR}/generate_assets.py"
 
-# 3. Compile Pure Qt5 Hook
+# 3. Compile Pure Qt5 Hook (Title, Subwindow Canvas Icon, URL Redirect)
 echo "==> Compiling Qt5 Hook Library..."
 mkdir -p "${PACKAGING_DIR}/hook"
 g++ -shared -fPIC -std=c++17 \
@@ -47,11 +49,32 @@ cp "${PACKAGING_DIR}/rlstudio.desktop" "${APPDIR}/usr/share/applications/rlstudi
 cp "${PACKAGING_DIR}/rlstudio.desktop" "${APPDIR}/usr/share/applications/org.kde.krita.desktop"
 cp "${PACKAGING_DIR}/rlstudio.desktop" "${APPDIR}/usr/share/applications/krita.desktop"
 
+# Scalable vector icon
+cp "${PACKAGING_DIR}/assets/rlstudio_logo.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/rlstudio.svg"
+cp "${PACKAGING_DIR}/assets/rlstudio_logo.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/krita-branding.svg"
+cp "${PACKAGING_DIR}/assets/rlstudio_logo.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/krita.svg"
+
+# Raster icons across all standard sizes
 for size in 16 22 24 32 48 64 128 256 512 1024; do
     mkdir -p "${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps"
-    cp "${PACKAGING_DIR}/assets/rlstudio_${size}.png" "${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps/rlstudio.png" 2>/dev/null || true
-    cp "${PACKAGING_DIR}/assets/rlstudio_${size}.png" "${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps/krita.png" 2>/dev/null || true
+    for iname in rlstudio krita-branding krita calligrakrita application-x-krita application-x-rlstudio; do
+        cp "${PACKAGING_DIR}/assets/rlstudio_${size}.png" \
+           "${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps/${iname}.png" 2>/dev/null || true
+    done
 done
+
+# MIME type registration for .rls
+cat > "${APPDIR}/usr/share/mime/packages/rlstudio.xml" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-rlstudio">
+    <comment>RL Studio Document</comment>
+    <comment xml:lang="tr">RL Studio Çizim Dosyası</comment>
+    <icon name="rlstudio"/>
+    <glob pattern="*.rls"/>
+  </mime-type>
+</mime-info>
+EOF
 
 # 5. Binaries
 echo "==> Placing application binaries..."
@@ -72,19 +95,13 @@ if [ -d "/usr/lib/x86_64-linux-gnu/kritaplugins" ]; then
     cp -a /usr/lib/x86_64-linux-gnu/kritaplugins/* "${APPDIR}/usr/lib/x86_64-linux-gnu/kritaplugins/" 2>/dev/null || true
 fi
 
-# 7. Apply Native Rebranding Patches to libkritaui.so
+# 7. Apply Native Rebranding Patches (libkritaui + .rls extension plugins)
 echo "==> Applying native branding patches..."
 TARGET_LIB="${APPDIR}/usr/lib/x86_64-linux-gnu/libkritaui.so.19.0.0"
 if [ -f "${TARGET_LIB}" ]; then
     python3 "${PACKAGING_DIR}/patch_binaries.py" "${TARGET_LIB}"
-else
-    for candidate in "${APPDIR}/usr/lib/x86_64-linux-gnu/libkritaui"*.so*; do
-        if [ ! -L "$candidate" ] && [ -f "$candidate" ]; then
-            python3 "${PACKAGING_DIR}/patch_binaries.py" "$candidate"
-            break
-        fi
-    done
 fi
+python3 -c "import sys; sys.path.append('${PACKAGING_DIR}'); import patch_binaries; patch_binaries.patch_plugins('${APPDIR}')"
 
 # 8. Shared Resources & Splash Screen
 echo "==> Bundling shared data and splash screens..."
