@@ -10,10 +10,25 @@
 #include <QIcon>
 #include <QPixmap>
 #include <QFile>
+#include <QMimeDatabase>
+#include <QMimeType>
+#include <QMessageBox>
 
 namespace {
 
 QString cleanTitle(QString t) {
+    if (t.isEmpty()) return t;
+    t.replace("Krita — ", "");
+    t.replace("Krita - ", "");
+    t.replace(" — Krita", "");
+    t.replace(" - Krita", "");
+    t.replace("Krita", "RLStudio");
+    t.replace("KRITA", "RLSTUDIO");
+    t.replace("krita", "rlstudio");
+    return t;
+}
+
+QString cleanMessage(QString t) {
     if (t.isEmpty()) return t;
     t.replace("Krita", "RLStudio");
     t.replace("KRITA", "RLSTUDIO");
@@ -135,16 +150,58 @@ typedef QString (*MimeTypeForSuffixFn)(const QString&);
 static MimeTypeForSuffixFn orig_mimeTypeForSuffix = nullptr;
 
 extern "C" QString _ZN15KisMimeDatabase17mimeTypeForSuffixERK7QString(const QString& suffix) {
-    if (!orig_mimeTypeForSuffix) {
-        orig_mimeTypeForSuffix = (MimeTypeForSuffixFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase17mimeTypeForSuffixERK7QString");
-    }
     if (suffix.compare("rls", Qt::CaseInsensitive) == 0) {
         return QStringLiteral("application/x-krita");
+    }
+    if (!orig_mimeTypeForSuffix) {
+        orig_mimeTypeForSuffix = (MimeTypeForSuffixFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase17mimeTypeForSuffixERK7QString");
     }
     return orig_mimeTypeForSuffix ? orig_mimeTypeForSuffix(suffix) : QString();
 }
 
-// 8. Hook QFileDialog::selectFile
+// 8. Hook KisMimeDatabase::mimeTypeForFile
+typedef QString (*MimeTypeForFileFn)(const QString&, bool);
+static MimeTypeForFileFn orig_mimeTypeForFile = nullptr;
+
+extern "C" QString _ZN15KisMimeDatabase15mimeTypeForFileERK7QStringb(const QString& file, bool matchMode) {
+    if (file.endsWith(".rls", Qt::CaseInsensitive)) {
+        return QStringLiteral("application/x-krita");
+    }
+    if (!orig_mimeTypeForFile) {
+        orig_mimeTypeForFile = (MimeTypeForFileFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase15mimeTypeForFileERK7QStringb");
+    }
+    return orig_mimeTypeForFile ? orig_mimeTypeForFile(file, matchMode) : QString();
+}
+
+// 9. Hook KisMimeDatabase::descriptionForMimeType
+typedef QString (*DescForMimeTypeFn)(const QString&);
+static DescForMimeTypeFn orig_descForMimeType = nullptr;
+
+extern "C" QString _ZN15KisMimeDatabase22descriptionForMimeTypeERK7QString(const QString& mimeType) {
+    if (mimeType == "application/x-krita" || mimeType == "application/x-rlstudio") {
+        return QStringLiteral("RL Studio belgesi (*.rls)");
+    }
+    if (!orig_descForMimeType) {
+        orig_descForMimeType = (DescForMimeTypeFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase22descriptionForMimeTypeERK7QString");
+    }
+    return orig_descForMimeType ? orig_descForMimeType(mimeType) : QString();
+}
+
+// 10. Hook QMimeDatabase::mimeTypeForFile
+typedef QMimeType (*MimeForFileQtFn)(const QMimeDatabase*, const QString&, int);
+static MimeForFileQtFn orig_qtMimeForFile = nullptr;
+
+extern "C" QMimeType _ZNK13QMimeDatabase15mimeTypeForFileERK7QStringNS_9MatchModeE(const QMimeDatabase* self, const QString& fileName, int mode) {
+    if (!orig_qtMimeForFile) {
+        orig_qtMimeForFile = (MimeForFileQtFn)dlsym(RTLD_NEXT, "_ZNK13QMimeDatabase15mimeTypeForFileERK7QStringNS_9MatchModeE");
+    }
+    if (fileName.endsWith(".rls", Qt::CaseInsensitive)) {
+        return self->mimeTypeForName(QStringLiteral("application/x-krita"));
+    }
+    return orig_qtMimeForFile ? orig_qtMimeForFile(self, fileName, mode) : QMimeType();
+}
+
+// 11. Hook QFileDialog::selectFile
 typedef void (*SelectFileFn)(QFileDialog*, const QString&);
 static SelectFileFn orig_selectFile = nullptr;
 
@@ -162,7 +219,7 @@ extern "C" void _ZN11QFileDialog10selectFileERK7QString(QFileDialog* self, const
     }
 }
 
-// 9. Hook QFileDialog::selectedFiles
+// 12. Hook QFileDialog::selectedFiles
 typedef QStringList (*SelectedFilesFn)(const QFileDialog*);
 static SelectedFilesFn orig_selectedFiles = nullptr;
 
@@ -182,7 +239,7 @@ extern "C" QStringList _ZNK11QFileDialog13selectedFilesEv(const QFileDialog* sel
     return files;
 }
 
-// 10. Hook QFileDialog::setDefaultSuffix
+// 13. Hook QFileDialog::setDefaultSuffix
 typedef void (*SetDefaultSuffixFn)(QFileDialog*, const QString&);
 static SetDefaultSuffixFn orig_setDefaultSuffix = nullptr;
 
@@ -199,7 +256,7 @@ extern "C" void _ZN11QFileDialog16setDefaultSuffixERK7QString(QFileDialog* self,
     }
 }
 
-// 11. Hook QFileDialog::setNameFilters
+// 14. Hook QFileDialog::setNameFilters
 typedef void (*SetNameFiltersFn)(QFileDialog*, const QStringList&);
 static SetNameFiltersFn orig_setNameFilters = nullptr;
 
@@ -211,28 +268,47 @@ extern "C" void _ZN11QFileDialog14setNameFiltersERK11QStringList(QFileDialog* se
     for (int i = 0; i < updated.size(); ++i) {
         updated[i].replace(".kra", ".rls");
         updated[i].replace("*.kra", "*.rls");
-        updated[i].replace("Krita document", "RL Studio document");
-        updated[i].replace("Krita Document", "RL Studio document");
+        updated[i].replace("Krita belgesi", "RL Studio belgesi (*.rls)");
+        updated[i].replace("Krita document", "RL Studio document (*.rls)");
+        updated[i].replace("Krita Document", "RL Studio Document (*.rls)");
     }
     if (orig_setNameFilters) {
         orig_setNameFilters(self, updated);
     }
 }
 
-// 12. Hook QFileDialog::selectNameFilter
-typedef void (*SelectNameFilterFn)(QFileDialog*, const QString&);
-static SelectNameFilterFn orig_selectNameFilter = nullptr;
+// 15. Hook QFileDialogOptions::setNameFilters (for Native GNOME Portal File Dialog)
+extern "C" void _ZN18QFileDialogOptions14setNameFiltersERK11QStringList(void* self, const QStringList& filters) {
+    static auto orig = (void (*)(void*, const QStringList&))dlsym(RTLD_NEXT, "_ZN18QFileDialogOptions14setNameFiltersERK11QStringList");
+    QStringList updated = filters;
+    for (int i = 0; i < updated.size(); ++i) {
+        updated[i].replace(".kra", ".rls");
+        updated[i].replace("*.kra", "*.rls");
+        updated[i].replace("Krita belgesi", "RL Studio belgesi (*.rls)");
+        updated[i].replace("Krita document", "RL Studio document (*.rls)");
+        updated[i].replace("Krita Document", "RL Studio Document (*.rls)");
+        updated[i].replace("Krita", "RL Studio");
+    }
+    if (orig) orig(self, updated);
+}
 
-extern "C" void _ZN11QFileDialog16selectNameFilterERK7QString(QFileDialog* self, const QString& filter) {
-    if (!orig_selectNameFilter) {
-        orig_selectNameFilter = (SelectNameFilterFn)dlsym(RTLD_NEXT, "_ZN11QFileDialog16selectNameFilterERK7QString");
-    }
-    QString f = filter;
-    f.replace(".kra", ".rls");
-    f.replace("*.kra", "*.rls");
-    f.replace("Krita document", "RL Studio document");
-    f.replace("Krita Document", "RL Studio document");
-    if (orig_selectNameFilter) {
-        orig_selectNameFilter(self, f);
-    }
+// 16. Hook QMessageBox::critical, warning, information
+typedef QMessageBox::StandardButton (*MsgBoxFn)(QWidget*, const QString&, const QString&, QMessageBox::StandardButtons, QMessageBox::StandardButton);
+
+extern "C" QMessageBox::StandardButton _ZN11QMessageBox8criticalEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_(
+    QWidget* parent, const QString& title, const QString& text, QMessageBox::StandardButtons buttons, QMessageBox::StandardButton defaultButton) {
+    static auto orig = (MsgBoxFn)dlsym(RTLD_NEXT, "_ZN11QMessageBox8criticalEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_");
+    return orig ? orig(parent, cleanTitle(title), cleanMessage(text), buttons, defaultButton) : QMessageBox::NoButton;
+}
+
+extern "C" QMessageBox::StandardButton _ZN11QMessageBox7warningEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_(
+    QWidget* parent, const QString& title, const QString& text, QMessageBox::StandardButtons buttons, QMessageBox::StandardButton defaultButton) {
+    static auto orig = (MsgBoxFn)dlsym(RTLD_NEXT, "_ZN11QMessageBox7warningEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_");
+    return orig ? orig(parent, cleanTitle(title), cleanMessage(text), buttons, defaultButton) : QMessageBox::NoButton;
+}
+
+extern "C" QMessageBox::StandardButton _ZN11QMessageBox11informationEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_(
+    QWidget* parent, const QString& title, const QString& text, QMessageBox::StandardButtons buttons, QMessageBox::StandardButton defaultButton) {
+    static auto orig = (MsgBoxFn)dlsym(RTLD_NEXT, "_ZN11QMessageBox11informationEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_");
+    return orig ? orig(parent, cleanTitle(title), cleanMessage(text), buttons, defaultButton) : QMessageBox::NoButton;
 }

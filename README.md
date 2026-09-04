@@ -17,11 +17,12 @@
 
 ---
 
-## 🌟 Overview
+## Overview
 
 **RL Studio** is an advanced desktop digital painting, concept art, and raster illustration suite for Linux. Engineered for high performance and creative flexibility, it features a modern responsive UI, multi-layer engine, hardware-accelerated canvas, customizable brushes, and native standalone portability.
 
 ### ✨ Key Features
+
 - **Standalone Linux AppImage**: Single-file executable with zero installation required. Works on Debian, Ubuntu, Fedora, Arch, and all major Linux distributions.
 - **Dedicated `.rls` Document Format**: Save and open projects directly in RL Studio's native `.rls` format.
 - **Custom Branding**: Fully customized splash screen, desktop icons, dialog headers, and interface accents.
@@ -30,9 +31,10 @@
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Download Standalone AppImage
+
 Get the latest prebuilt AppImage from [GitHub Releases](https://github.com/RetakJunior/RL-Studio/releases):
 
 ```bash
@@ -44,6 +46,7 @@ chmod +x RLStudio-x86_64.AppImage
 ```
 
 ### 2. Python / PyPI CLI
+
 Install the official launcher package from [PyPI](https://pypi.org/project/rlstudio/):
 
 ```bash
@@ -58,6 +61,7 @@ rlstudio
 ## 📁 Native File Format (`.rls`)
 
 RL Studio saves project files with the `.rls` extension by default:
+
 - **Default Format**: `.rls` (RL Studio Document)
 - **MIME Type**: `application/x-rlstudio`
 - **Backward Compatibility**: Fully compatible with existing `.kra` projects.
@@ -78,6 +82,7 @@ cd RL-Studio
 ```
 
 The output AppImage will be placed in the `dist/` directory:
+
 ```
 dist/RLStudio-x86_64.AppImage
 ```

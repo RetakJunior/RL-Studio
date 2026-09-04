@@ -25,3 +25,4 @@ Issues = "https://github.com/RetakJunior/RL-Studio/issues"
 
 [project.scripts]
 rlstudio = "rlstudio.cli:main"
+

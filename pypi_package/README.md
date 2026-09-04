@@ -9,6 +9,7 @@
 ## Quick Start
 
 ### Running via AppImage
+
 Download the standalone AppImage directly from GitHub Releases:
 [https://github.com/RetakJunior/RL-Studio/releases](https://github.com/RetakJunior/RL-Studio/releases)
 
@@ -18,6 +19,7 @@ chmod +x RLStudio-x86_64.AppImage
 ```
 
 ### Python CLI
+
 ```bash
 pip install rlstudio
 rlstudio
