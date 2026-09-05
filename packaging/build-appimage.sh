@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGING_DIR="${ROOT_DIR}/packaging"
@@ -138,7 +138,7 @@ echo "==> Collecting library dependencies..."
 collect_deps() {
     local binary="$1"
     if [ ! -f "$binary" ]; then return 0; fi
-    ldd "$binary" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read -r lib; do
+    ldd "$binary" 2>/dev/null | (grep "=> /" || true) | awk '{print $3}' | while read -r lib; do
         if [[ ! "$lib" =~ libc\.so && ! "$lib" =~ libpthread\.so && ! "$lib" =~ libdl\.so && ! "$lib" =~ libm\.so && ! "$lib" =~ libGL\.so && ! "$lib" =~ libdrm\.so ]]; then
             local dest="${APPDIR}/usr/lib/x86_64-linux-gnu/$(basename "$lib")"
             if [ -f "$lib" ] && [ ! -f "$dest" ]; then
@@ -149,12 +149,8 @@ collect_deps() {
 }
 
 collect_deps "${APPDIR}/usr/bin/rlstudio"
-for f in "${APPDIR}/usr/lib/x86_64-linux-gnu/libkrita"*.so*; do
-    collect_deps "$f"
-done
-for f in "${APPDIR}/usr/plugins/platforms/"*.so; do
-    collect_deps "$f"
-done
+collect_deps "${APPDIR}/usr/lib/x86_64-linux-gnu/libkritaui.so.19.0.0"
+collect_deps "${APPDIR}/usr/plugins/platforms/libqxcb.so"
 
 # 11. Install AppRun
 echo "==> Configuring AppRun..."

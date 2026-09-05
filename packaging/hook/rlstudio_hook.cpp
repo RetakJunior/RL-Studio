@@ -15,6 +15,8 @@
 #include <QMimeDatabase>
 #include <QMimeType>
 #include <QMessageBox>
+#include <QAbstractButton>
+#include <QLabel>
 
 namespace {
 
@@ -24,6 +26,8 @@ QString cleanTitle(QString t) {
     t.replace("Krita - ", "");
     t.replace(" — Krita", "");
     t.replace(" - Krita", "");
+    t.replace("Krita file", "RL Studio file");
+    t.replace("Krita files", "RL Studio files");
     t.replace("Krita", "RLStudio");
     t.replace("KRITA", "RLSTUDIO");
     t.replace("krita", "rlstudio");
@@ -32,8 +36,10 @@ QString cleanTitle(QString t) {
 
 QString cleanMessage(QString t) {
     if (t.isEmpty()) return t;
-    t.replace("Krita", "RLStudio");
-    t.replace("KRITA", "RLSTUDIO");
+    t.replace("Krita file", "RL Studio file");
+    t.replace("Krita files", "RL Studio files");
+    t.replace("Krita", "RL Studio");
+    t.replace("KRITA", "RL STUDIO");
     t.replace("krita", "rlstudio");
     return t;
 }
@@ -131,7 +137,35 @@ extern "C" QString _ZNK10KAboutData11productNameEv(const void* /*self*/) {
     return QStringLiteral("RLStudio");
 }
 
-// 6. Hook KisMimeDatabase::suffixesForMimeType
+// 6. Hook QAbstractButton::setText (fixes "Also save your image as a Krita file")
+typedef void (*BtnSetTextFn)(QAbstractButton*, const QString&);
+static BtnSetTextFn orig_btnSetText = nullptr;
+
+extern "C" void _ZN15QAbstractButton7setTextERK7QString(QAbstractButton* self, const QString& text) {
+    if (!orig_btnSetText) {
+        orig_btnSetText = (BtnSetTextFn)dlsym(RTLD_NEXT, "_ZN15QAbstractButton7setTextERK7QString");
+    }
+    QString sanitized = cleanMessage(text);
+    if (orig_btnSetText) {
+        orig_btnSetText(self, sanitized);
+    }
+}
+
+// 7. Hook QLabel::setText
+typedef void (*LabelSetTextFn)(QLabel*, const QString&);
+static LabelSetTextFn orig_labelSetText = nullptr;
+
+extern "C" void _ZN6QLabel7setTextERK7QString(QLabel* self, const QString& text) {
+    if (!orig_labelSetText) {
+        orig_labelSetText = (LabelSetTextFn)dlsym(RTLD_NEXT, "_ZN6QLabel7setTextERK7QString");
+    }
+    QString sanitized = cleanMessage(text);
+    if (orig_labelSetText) {
+        orig_labelSetText(self, sanitized);
+    }
+}
+
+// 8. Hook KisMimeDatabase::suffixesForMimeType
 typedef QStringList (*SuffixesForMimeTypeFn)(const QString&);
 static SuffixesForMimeTypeFn orig_suffixesForMimeType = nullptr;
 
@@ -153,7 +187,7 @@ extern "C" QStringList _ZN15KisMimeDatabase19suffixesForMimeTypeERK7QString(cons
     return orig_suffixesForMimeType ? orig_suffixesForMimeType(mimeType) : QStringList();
 }
 
-// 7. Hook KisMimeDatabase::mimeTypeForSuffix
+// 9. Hook KisMimeDatabase::mimeTypeForSuffix
 typedef QString (*MimeTypeForSuffixFn)(const QString&);
 static MimeTypeForSuffixFn orig_mimeTypeForSuffix = nullptr;
 
@@ -173,7 +207,7 @@ extern "C" QString _ZN15KisMimeDatabase17mimeTypeForSuffixERK7QString(const QStr
     return orig_mimeTypeForSuffix ? orig_mimeTypeForSuffix(suffix) : QString();
 }
 
-// 8. Hook KisMimeDatabase::mimeTypeForFile
+// 10. Hook KisMimeDatabase::mimeTypeForFile
 typedef QString (*MimeTypeForFileFn)(const QString&, bool);
 static MimeTypeForFileFn orig_mimeTypeForFile = nullptr;
 
@@ -193,7 +227,7 @@ extern "C" QString _ZN15KisMimeDatabase15mimeTypeForFileERK7QStringb(const QStri
     return orig_mimeTypeForFile ? orig_mimeTypeForFile(file, matchMode) : QString();
 }
 
-// 9. Hook KisMimeDatabase::descriptionForMimeType
+// 11. Hook KisMimeDatabase::descriptionForMimeType
 typedef QString (*DescForMimeTypeFn)(const QString&);
 static DescForMimeTypeFn orig_descForMimeType = nullptr;
 
@@ -213,7 +247,7 @@ extern "C" QString _ZN15KisMimeDatabase22descriptionForMimeTypeERK7QString(const
     return orig_descForMimeType ? orig_descForMimeType(mimeType) : QString();
 }
 
-// 10. Hook KisImportExportManager::supportedMimeTypes to add SVG and ICO to export list
+// 12. Hook KisImportExportManager::supportedMimeTypes
 typedef QStringList (*SupportedMimeTypesFn)(int);
 static SupportedMimeTypesFn orig_supportedMimeTypes = nullptr;
 
@@ -227,7 +261,7 @@ extern "C" QStringList _ZN22KisImportExportManager18supportedMimeTypesENS_9Direc
     return res;
 }
 
-// 11. Hook KisImportExportManager::filterForMimeType to route SVG to qimageio exporter
+// 13. Hook KisImportExportManager::filterForMimeType
 typedef void* (*FilterForMimeTypeFn)(const QString&, int);
 static FilterForMimeTypeFn orig_filterForMimeType = nullptr;
 
@@ -241,7 +275,7 @@ extern "C" void* _ZN22KisImportExportManager17filterForMimeTypeERK7QStringNS_9Di
     return orig_filterForMimeType ? orig_filterForMimeType(mimeType, direction) : nullptr;
 }
 
-// 12. Hook QImage::save to handle SVG export losslessly
+// 14. Hook QImage::save to handle SVG export
 typedef bool (*QImageSaveFn)(const QImage*, QIODevice*, const char*, int);
 static QImageSaveFn orig_qimageSave = nullptr;
 
@@ -253,7 +287,9 @@ extern "C" bool _ZNK6QImage4saveEP9QIODevicePKci(const QImage* self, QIODevice* 
         QByteArray pngBytes;
         QBuffer buf(&pngBytes);
         buf.open(QIODevice::WriteOnly);
-        self->save(&buf, "PNG");
+        if (orig_qimageSave) {
+            orig_qimageSave(self, &buf, "PNG", -1);
+        }
         buf.close();
 
         QByteArray b64 = pngBytes.toBase64();
@@ -271,7 +307,26 @@ extern "C" bool _ZNK6QImage4saveEP9QIODevicePKci(const QImage* self, QIODevice* 
     return orig_qimageSave ? orig_qimageSave(self, device, format, quality) : false;
 }
 
-// 13. Hook QMimeDatabase::mimeTypeForFile
+typedef bool (*QImageFileSaveFn)(const QImage*, const QString&, const char*, int);
+static QImageFileSaveFn orig_qimageFileSave = nullptr;
+
+extern "C" bool _ZNK6QImage4saveERK7QStringPKci(const QImage* self, const QString& fileName, const char* format, int quality) {
+    if (!orig_qimageFileSave) {
+        orig_qimageFileSave = (QImageFileSaveFn)dlsym(RTLD_NEXT, "_ZNK6QImage4saveERK7QStringPKci");
+    }
+    if (fileName.endsWith(".svg", Qt::CaseInsensitive) || (format && strcasecmp(format, "svg") == 0)) {
+        QFile f(fileName);
+        if (f.open(QIODevice::WriteOnly)) {
+            bool ok = _ZNK6QImage4saveEP9QIODevicePKci(self, &f, "svg", quality);
+            f.close();
+            return ok;
+        }
+        return false;
+    }
+    return orig_qimageFileSave ? orig_qimageFileSave(self, fileName, format, quality) : false;
+}
+
+// 15. Hook QMimeDatabase::mimeTypeForFile
 typedef QMimeType (*MimeForFileQtFn)(const QMimeDatabase*, const QString&, int);
 static MimeForFileQtFn orig_qtMimeForFile = nullptr;
 
@@ -291,7 +346,7 @@ extern "C" QMimeType _ZNK13QMimeDatabase15mimeTypeForFileERK7QStringNS_9MatchMod
     return orig_qtMimeForFile ? orig_qtMimeForFile(self, fileName, mode) : QMimeType();
 }
 
-// 14. Hook QFileDialog::selectFile
+// 16. Hook QFileDialog::selectFile
 typedef void (*SelectFileFn)(QFileDialog*, const QString&);
 static SelectFileFn orig_selectFile = nullptr;
 
@@ -309,7 +364,7 @@ extern "C" void _ZN11QFileDialog10selectFileERK7QString(QFileDialog* self, const
     }
 }
 
-// 15. Hook QFileDialog::selectedFiles
+// 17. Hook QFileDialog::selectedFiles
 typedef QStringList (*SelectedFilesFn)(const QFileDialog*);
 static SelectedFilesFn orig_selectedFiles = nullptr;
 
@@ -329,7 +384,7 @@ extern "C" QStringList _ZNK11QFileDialog13selectedFilesEv(const QFileDialog* sel
     return files;
 }
 
-// 16. Hook QFileDialog::setDefaultSuffix
+// 18. Hook QFileDialog::setDefaultSuffix
 typedef void (*SetDefaultSuffixFn)(QFileDialog*, const QString&);
 static SetDefaultSuffixFn orig_setDefaultSuffix = nullptr;
 
@@ -346,7 +401,7 @@ extern "C" void _ZN11QFileDialog16setDefaultSuffixERK7QString(QFileDialog* self,
     }
 }
 
-// 17. Hook QFileDialog::setNameFilters
+// 19. Hook QFileDialog::setNameFilters
 typedef void (*SetNameFiltersFn)(QFileDialog*, const QStringList&);
 static SetNameFiltersFn orig_setNameFilters = nullptr;
 
@@ -372,7 +427,7 @@ extern "C" void _ZN11QFileDialog14setNameFiltersERK11QStringList(QFileDialog* se
     }
 }
 
-// 18. Hook QFileDialogOptions::setNameFilters (for Native GNOME Portal File Dialog)
+// 20. Hook QFileDialogOptions::setNameFilters (for Native GNOME Portal File Dialog)
 extern "C" void _ZN18QFileDialogOptions14setNameFiltersERK11QStringList(void* self, const QStringList& filters) {
     static auto orig = (void (*)(void*, const QStringList&))dlsym(RTLD_NEXT, "_ZN18QFileDialogOptions14setNameFiltersERK11QStringList");
     QStringList updated = filters;
@@ -392,7 +447,7 @@ extern "C" void _ZN18QFileDialogOptions14setNameFiltersERK11QStringList(void* se
     if (orig) orig(self, updated);
 }
 
-// 19. Hook QMessageBox::critical, warning, information
+// 21. Hook QMessageBox::critical, warning, information
 typedef QMessageBox::StandardButton (*MsgBoxFn)(QWidget*, const QString&, const QString&, QMessageBox::StandardButtons, QMessageBox::StandardButton);
 
 extern "C" QMessageBox::StandardButton _ZN11QMessageBox8criticalEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_(
