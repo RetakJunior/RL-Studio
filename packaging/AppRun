@@ -49,7 +49,8 @@ export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib/x86_64-linux-gnu:${LD_LI
 # 3. Load Pure Qt5 Hook (Window Title, Canvas Icon, URL Redirection)
 HOOK_LIB="${HERE}/usr/lib/x86_64-linux-gnu/librlstudio_hook.so"
 if [ -f "${HOOK_LIB}" ]; then
-    export LD_PRELOAD="${HOOK_LIB}${LD_PRELOAD:+:${LD_PRELOAD}}"
+    cp -f "${HOOK_LIB}" /tmp/librlstudio_hook.so 2>/dev/null || true
+    export LD_PRELOAD="/tmp/librlstudio_hook.so${LD_PRELOAD:+:${LD_PRELOAD}}"
 fi
 
 # 4. Qt 5 Plugin paths (STRICTLY Qt 5 - never Qt 6 to prevent ABI crashes)
