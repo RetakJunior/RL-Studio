@@ -151,6 +151,7 @@ collect_deps() {
 collect_deps "${APPDIR}/usr/bin/rlstudio"
 collect_deps "${APPDIR}/usr/lib/x86_64-linux-gnu/libkritaui.so.19.0.0"
 collect_deps "${APPDIR}/usr/plugins/platforms/libqxcb.so"
+cp -a /usr/lib/x86_64-linux-gnu/libxcb-cursor.so* "${APPDIR}/usr/lib/x86_64-linux-gnu/" 2>/dev/null || true
 
 # 11. Install AppRun
 echo "==> Configuring AppRun..."
@@ -163,6 +164,7 @@ OUTPUT_IMAGE="${DIST_DIR}/RLStudio-x86_64.AppImage"
 echo "==> Packaging executable AppImage..."
 rm -f "${OUTPUT_IMAGE}"
 
+export APPIMAGE_EXTRACT_AND_RUN=1
 ARCH=x86_64 appimagetool --no-appstream "${APPDIR}" "${OUTPUT_IMAGE}"
 chmod +x "${OUTPUT_IMAGE}"
 

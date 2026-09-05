@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rlstudio"
-version = "1.1.6"
+version = "1.1.7"
 description = "RL Studio - Professional digital painting and concept art studio"
 readme = "README.md"
 authors = [{ name = "RetakJunior", email = "retakjunior@users.noreply.github.com" }]

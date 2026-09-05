@@ -92,13 +92,6 @@ def patch_libkritaui(so_path):
         print(f"  ✓ Patched News text at {hex(idx_news)}")
         idx_news = data.find(old_news, idx_news + len(old_news))
 
-    # 9. Patch 'Also save your image as a Krita file.' -> 'Also save as an RL Studio file.     '
-    old_warn = b"Also save your image as a Krita file."
-    idx_warn = data.find(old_warn)
-    if idx_warn != -1:
-        new_warn = b"Also save as an RL Studio file.     "
-        data[idx_warn:idx_warn+len(old_warn)] = new_warn
-        print(f"  ✓ Patched 'Also save as Krita file' text at {hex(idx_warn)}")
 
     with open(so_path, "wb") as f:
         f.write(data)
