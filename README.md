@@ -30,7 +30,7 @@ rlstudio
 
 ## Supported File Formats
 
-- **Native Format**: `.rls` (RL Studio project format, backward-compatible with `.kra`)
+- **Native Format**: `.rls` 
 - **Vector & Icons**: `.svg`, `.ico`
 - **Raster Formats**: `.png`, `.jpg`, `.jpeg`, `.webp`, `.tga`, `.tiff`, `.bmp`, `.psd`, `.exr`, `.gif`
 
