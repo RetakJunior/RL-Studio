@@ -1,18 +1,13 @@
-# ==============================================================================
-# RL Studio - Git Ignore Rules
-# ==============================================================================
-
-# Application Packages & AppImages
+# Build & packaging
 dist/
 RetakAlium.AppDir/
 *.AppImage
 *.sfs
 *.iso
 
-# Python Packaging & Artifacts
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
 *.egg-info/
 pypi_package/dist/
 pypi_package/build/
@@ -20,23 +15,18 @@ pypi_package/src/*.egg-info/
 .venv/
 venv/
 
-# Upstream Source & C++/CMake Build Files
+# C++ / CMake build artifacts
 krita/
 build/
 *.o
-*.obj
 *.so
 *.so.*
-*.dylib
-*.dll
 *.a
-*.lib
 
-# Temporary & Editor Files
+# Editor & OS
 .vscode/
 .idea/
 *.swp
 *~
 .DS_Store
 *.log
-/tmp/

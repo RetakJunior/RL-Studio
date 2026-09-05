@@ -1,26 +1,18 @@
-# RL Studio
+# rlstudio
 
-**RL Studio** is a professional, high-performance desktop painting, concept art, and digital illustration application for Linux.
+Python launcher and CLI tool for **RL Studio**, a desktop digital painting application for Linux.
 
-- **GitHub Repository**: [https://github.com/RetakJunior/RL-Studio](https://github.com/RetakJunior/RL-Studio)
-- **Native File Format**: `.rls` (RL Studio Document)
-- **Platform**: Linux (Standalone AppImage)
-
-## Quick Start
-
-### Running via AppImage
-
-Download the standalone AppImage directly from GitHub Releases:
-[https://github.com/RetakJunior/RL-Studio/releases](https://github.com/RetakJunior/RL-Studio/releases)
+## Usage
 
 ```bash
-chmod +x RLStudio-x86_64.AppImage
-./RLStudio-x86_64.AppImage
-```
-
-### Python CLI
-
-```bash
-pip install rlstudio
+pip install --upgrade rlstudio
 rlstudio
 ```
+
+If the RL Studio AppImage is already present on your system, `rlstudio` launches it directly. Otherwise, it provides direct download links to the latest release.
+
+## Links
+
+- GitHub Repository: https://github.com/RetakJunior/RL-Studio
+- Releases: https://github.com/RetakJunior/RL-Studio/releases
+- Native Format: `.rls`

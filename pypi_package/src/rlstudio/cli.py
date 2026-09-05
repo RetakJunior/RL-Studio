@@ -18,7 +18,7 @@ def main():
     if bin_path and os.path.abspath(bin_path) != os.path.abspath(sys.argv[0]):
         os.execv(bin_path, [bin_path] + sys.argv[1:])
 
-    print("RL Studio (v1.0.1)")
+    print("RL Studio (v1.1.5)")
     print("Professional digital painting & concept art studio.")
     print("GitHub: https://github.com/RetakJunior/RL-Studio")
     print("\nDownload the latest Linux standalone AppImage from:")

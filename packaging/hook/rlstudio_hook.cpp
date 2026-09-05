@@ -10,6 +10,8 @@
 #include <QIcon>
 #include <QPixmap>
 #include <QFile>
+#include <QImage>
+#include <QBuffer>
 #include <QMimeDatabase>
 #include <QMimeType>
 #include <QMessageBox>
@@ -142,6 +144,12 @@ extern "C" QStringList _ZN15KisMimeDatabase19suffixesForMimeTypeERK7QString(cons
         list << QStringLiteral("rls") << QStringLiteral("kra");
         return list;
     }
+    if (mimeType == "image/svg+xml") {
+        return QStringList() << QStringLiteral("svg");
+    }
+    if (mimeType == "image/vnd.microsoft.icon" || mimeType == "image/x-icon") {
+        return QStringList() << QStringLiteral("ico");
+    }
     return orig_suffixesForMimeType ? orig_suffixesForMimeType(mimeType) : QStringList();
 }
 
@@ -152,6 +160,12 @@ static MimeTypeForSuffixFn orig_mimeTypeForSuffix = nullptr;
 extern "C" QString _ZN15KisMimeDatabase17mimeTypeForSuffixERK7QString(const QString& suffix) {
     if (suffix.compare("rls", Qt::CaseInsensitive) == 0) {
         return QStringLiteral("application/x-krita");
+    }
+    if (suffix.compare("svg", Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("image/svg+xml");
+    }
+    if (suffix.compare("ico", Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("image/vnd.microsoft.icon");
     }
     if (!orig_mimeTypeForSuffix) {
         orig_mimeTypeForSuffix = (MimeTypeForSuffixFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase17mimeTypeForSuffixERK7QString");
@@ -167,6 +181,12 @@ extern "C" QString _ZN15KisMimeDatabase15mimeTypeForFileERK7QStringb(const QStri
     if (file.endsWith(".rls", Qt::CaseInsensitive)) {
         return QStringLiteral("application/x-krita");
     }
+    if (file.endsWith(".svg", Qt::CaseInsensitive)) {
+        return QStringLiteral("image/svg+xml");
+    }
+    if (file.endsWith(".ico", Qt::CaseInsensitive)) {
+        return QStringLiteral("image/vnd.microsoft.icon");
+    }
     if (!orig_mimeTypeForFile) {
         orig_mimeTypeForFile = (MimeTypeForFileFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase15mimeTypeForFileERK7QStringb");
     }
@@ -181,13 +201,77 @@ extern "C" QString _ZN15KisMimeDatabase22descriptionForMimeTypeERK7QString(const
     if (mimeType == "application/x-krita" || mimeType == "application/x-rlstudio") {
         return QStringLiteral("RL Studio belgesi (*.rls)");
     }
+    if (mimeType == "image/svg+xml") {
+        return QStringLiteral("SVG görüntüsü (*.svg)");
+    }
+    if (mimeType == "image/vnd.microsoft.icon" || mimeType == "image/x-icon") {
+        return QStringLiteral("ICO görüntüsü (*.ico)");
+    }
     if (!orig_descForMimeType) {
         orig_descForMimeType = (DescForMimeTypeFn)dlsym(RTLD_NEXT, "_ZN15KisMimeDatabase22descriptionForMimeTypeERK7QString");
     }
     return orig_descForMimeType ? orig_descForMimeType(mimeType) : QString();
 }
 
-// 10. Hook QMimeDatabase::mimeTypeForFile
+// 10. Hook KisImportExportManager::supportedMimeTypes to add SVG and ICO to export list
+typedef QStringList (*SupportedMimeTypesFn)(int);
+static SupportedMimeTypesFn orig_supportedMimeTypes = nullptr;
+
+extern "C" QStringList _ZN22KisImportExportManager18supportedMimeTypesENS_9DirectionE(int direction) {
+    if (!orig_supportedMimeTypes) {
+        orig_supportedMimeTypes = (SupportedMimeTypesFn)dlsym(RTLD_NEXT, "_ZN22KisImportExportManager18supportedMimeTypesENS_9DirectionE");
+    }
+    QStringList res = orig_supportedMimeTypes ? orig_supportedMimeTypes(direction) : QStringList();
+    if (!res.contains("image/svg+xml")) res << QStringLiteral("image/svg+xml");
+    if (!res.contains("image/vnd.microsoft.icon")) res << QStringLiteral("image/vnd.microsoft.icon");
+    return res;
+}
+
+// 11. Hook KisImportExportManager::filterForMimeType to route SVG to qimageio exporter
+typedef void* (*FilterForMimeTypeFn)(const QString&, int);
+static FilterForMimeTypeFn orig_filterForMimeType = nullptr;
+
+extern "C" void* _ZN22KisImportExportManager17filterForMimeTypeERK7QStringNS_9DirectionE(const QString& mimeType, int direction) {
+    if (!orig_filterForMimeType) {
+        orig_filterForMimeType = (FilterForMimeTypeFn)dlsym(RTLD_NEXT, "_ZN22KisImportExportManager17filterForMimeTypeERK7QStringNS_9DirectionE");
+    }
+    if (mimeType == "image/svg+xml") {
+        return orig_filterForMimeType ? orig_filterForMimeType(QStringLiteral("image/vnd.microsoft.icon"), direction) : nullptr;
+    }
+    return orig_filterForMimeType ? orig_filterForMimeType(mimeType, direction) : nullptr;
+}
+
+// 12. Hook QImage::save to handle SVG export losslessly
+typedef bool (*QImageSaveFn)(const QImage*, QIODevice*, const char*, int);
+static QImageSaveFn orig_qimageSave = nullptr;
+
+extern "C" bool _ZNK6QImage4saveEP9QIODevicePKci(const QImage* self, QIODevice* device, const char* format, int quality) {
+    if (!orig_qimageSave) {
+        orig_qimageSave = (QImageSaveFn)dlsym(RTLD_NEXT, "_ZNK6QImage4saveEP9QIODevicePKci");
+    }
+    if (format && strcasecmp(format, "svg") == 0) {
+        QByteArray pngBytes;
+        QBuffer buf(&pngBytes);
+        buf.open(QIODevice::WriteOnly);
+        self->save(&buf, "PNG");
+        buf.close();
+
+        QByteArray b64 = pngBytes.toBase64();
+        QString svgContent = QString(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n"
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+            "width=\"%1\" height=\"%2\" viewBox=\"0 0 %1 %2\">\n"
+            "  <image width=\"%1\" height=\"%2\" xlink:href=\"data:image/png;base64,%3\"/>\n"
+            "</svg>\n"
+        ).arg(self->width()).arg(self->height()).arg(QString::fromLatin1(b64));
+
+        qint64 written = device->write(svgContent.toUtf8());
+        return written > 0;
+    }
+    return orig_qimageSave ? orig_qimageSave(self, device, format, quality) : false;
+}
+
+// 13. Hook QMimeDatabase::mimeTypeForFile
 typedef QMimeType (*MimeForFileQtFn)(const QMimeDatabase*, const QString&, int);
 static MimeForFileQtFn orig_qtMimeForFile = nullptr;
 
@@ -198,10 +282,16 @@ extern "C" QMimeType _ZNK13QMimeDatabase15mimeTypeForFileERK7QStringNS_9MatchMod
     if (fileName.endsWith(".rls", Qt::CaseInsensitive)) {
         return self->mimeTypeForName(QStringLiteral("application/x-krita"));
     }
+    if (fileName.endsWith(".svg", Qt::CaseInsensitive)) {
+        return self->mimeTypeForName(QStringLiteral("image/svg+xml"));
+    }
+    if (fileName.endsWith(".ico", Qt::CaseInsensitive)) {
+        return self->mimeTypeForName(QStringLiteral("image/vnd.microsoft.icon"));
+    }
     return orig_qtMimeForFile ? orig_qtMimeForFile(self, fileName, mode) : QMimeType();
 }
 
-// 11. Hook QFileDialog::selectFile
+// 14. Hook QFileDialog::selectFile
 typedef void (*SelectFileFn)(QFileDialog*, const QString&);
 static SelectFileFn orig_selectFile = nullptr;
 
@@ -219,7 +309,7 @@ extern "C" void _ZN11QFileDialog10selectFileERK7QString(QFileDialog* self, const
     }
 }
 
-// 12. Hook QFileDialog::selectedFiles
+// 15. Hook QFileDialog::selectedFiles
 typedef QStringList (*SelectedFilesFn)(const QFileDialog*);
 static SelectedFilesFn orig_selectedFiles = nullptr;
 
@@ -239,7 +329,7 @@ extern "C" QStringList _ZNK11QFileDialog13selectedFilesEv(const QFileDialog* sel
     return files;
 }
 
-// 13. Hook QFileDialog::setDefaultSuffix
+// 16. Hook QFileDialog::setDefaultSuffix
 typedef void (*SetDefaultSuffixFn)(QFileDialog*, const QString&);
 static SetDefaultSuffixFn orig_setDefaultSuffix = nullptr;
 
@@ -256,7 +346,7 @@ extern "C" void _ZN11QFileDialog16setDefaultSuffixERK7QString(QFileDialog* self,
     }
 }
 
-// 14. Hook QFileDialog::setNameFilters
+// 17. Hook QFileDialog::setNameFilters
 typedef void (*SetNameFiltersFn)(QFileDialog*, const QStringList&);
 static SetNameFiltersFn orig_setNameFilters = nullptr;
 
@@ -272,12 +362,17 @@ extern "C" void _ZN11QFileDialog14setNameFiltersERK11QStringList(QFileDialog* se
         updated[i].replace("Krita document", "RL Studio document (*.rls)");
         updated[i].replace("Krita Document", "RL Studio Document (*.rls)");
     }
+    QString svgFilter = QStringLiteral("SVG görüntüsü (*.svg)");
+    QString icoFilter = QStringLiteral("ICO görüntüsü (*.ico)");
+    if (!updated.contains(svgFilter)) updated.append(svgFilter);
+    if (!updated.contains(icoFilter)) updated.append(icoFilter);
+
     if (orig_setNameFilters) {
         orig_setNameFilters(self, updated);
     }
 }
 
-// 15. Hook QFileDialogOptions::setNameFilters (for Native GNOME Portal File Dialog)
+// 18. Hook QFileDialogOptions::setNameFilters (for Native GNOME Portal File Dialog)
 extern "C" void _ZN18QFileDialogOptions14setNameFiltersERK11QStringList(void* self, const QStringList& filters) {
     static auto orig = (void (*)(void*, const QStringList&))dlsym(RTLD_NEXT, "_ZN18QFileDialogOptions14setNameFiltersERK11QStringList");
     QStringList updated = filters;
@@ -289,10 +384,15 @@ extern "C" void _ZN18QFileDialogOptions14setNameFiltersERK11QStringList(void* se
         updated[i].replace("Krita Document", "RL Studio Document (*.rls)");
         updated[i].replace("Krita", "RL Studio");
     }
+    QString svgFilter = QStringLiteral("SVG görüntüsü (*.svg)");
+    QString icoFilter = QStringLiteral("ICO görüntüsü (*.ico)");
+    if (!updated.contains(svgFilter)) updated.append(svgFilter);
+    if (!updated.contains(icoFilter)) updated.append(icoFilter);
+
     if (orig) orig(self, updated);
 }
 
-// 16. Hook QMessageBox::critical, warning, information
+// 19. Hook QMessageBox::critical, warning, information
 typedef QMessageBox::StandardButton (*MsgBoxFn)(QWidget*, const QString&, const QString&, QMessageBox::StandardButtons, QMessageBox::StandardButton);
 
 extern "C" QMessageBox::StandardButton _ZN11QMessageBox8criticalEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_(
