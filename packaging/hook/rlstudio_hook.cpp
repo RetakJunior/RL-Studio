@@ -41,8 +41,19 @@ namespace
     {
         if (t.isEmpty())
             return t;
+        if (t.contains("Artwork by") || t.contains("Tyson Tan"))
+        {
+            return QStringLiteral("RL Studio Creative Suite");
+        }
+        if (t.contains("25 years", Qt::CaseInsensitive))
+        {
+            return QString();
+        }
+        t.replace("Krita belgesi", "RL Studio belgesi (*.rls)");
         t.replace("Krita file", "RL Studio file");
         t.replace("Krita files", "RL Studio files");
+        t.replace("Krita document", "RL Studio document (*.rls)");
+        t.replace("Krita Document", "RL Studio Document (*.rls)");
         t.replace("Krita", "RL Studio");
         t.replace("KRITA", "RL STUDIO");
         t.replace("krita", "rlstudio");
@@ -327,9 +338,9 @@ extern "C" void *_ZN22KisImportExportManager17filterForMimeTypeERK7QStringNS_9Di
     {
         orig_filterForMimeType = (FilterForMimeTypeFn)dlsym(RTLD_NEXT, "_ZN22KisImportExportManager17filterForMimeTypeERK7QStringNS_9DirectionE");
     }
-    if (mimeType == "image/svg+xml")
+    if (mimeType == "image/svg+xml" || mimeType == "image/vnd.microsoft.icon" || mimeType == "image/x-icon")
     {
-        return orig_filterForMimeType ? orig_filterForMimeType(QStringLiteral("image/vnd.microsoft.icon"), direction) : nullptr;
+        return orig_filterForMimeType ? orig_filterForMimeType(QStringLiteral("image/png"), direction) : nullptr;
     }
     return orig_filterForMimeType ? orig_filterForMimeType(mimeType, direction) : nullptr;
 }
@@ -568,4 +579,133 @@ extern "C" QMessageBox::StandardButton _ZN11QMessageBox11informationEP7QWidgetRK
 {
     static auto orig = (MsgBoxFn)dlsym(RTLD_NEXT, "_ZN11QMessageBox11informationEP7QWidgetRK7QStringS4_6QFlagsINS_14StandardButtonEES6_");
     return orig ? orig(parent, cleanTitle(title), cleanMessage(text), buttons, defaultButton) : QMessageBox::NoButton;
+}
+
+// 22. Hook QFileDialog::setMimeTypeFilters
+typedef void (*SetMimeTypeFiltersFn)(QFileDialog *, const QStringList &);
+static SetMimeTypeFiltersFn orig_setMimeTypeFilters = nullptr;
+
+extern "C" void _ZN11QFileDialog18setMimeTypeFiltersERK11QStringList(QFileDialog *self, const QStringList &filters)
+{
+    if (!orig_setMimeTypeFilters)
+    {
+        orig_setMimeTypeFilters = (SetMimeTypeFiltersFn)dlsym(RTLD_NEXT, "_ZN11QFileDialog18setMimeTypeFiltersERK11QStringList");
+    }
+    QStringList updated = filters;
+    if (!updated.contains("image/svg+xml"))
+        updated.append(QStringLiteral("image/svg+xml"));
+    if (!updated.contains("image/vnd.microsoft.icon"))
+        updated.append(QStringLiteral("image/vnd.microsoft.icon"));
+
+    if (orig_setMimeTypeFilters)
+    {
+        orig_setMimeTypeFilters(self, updated);
+    }
+}
+
+// 23. Hook QFileDialogOptions::setMimeTypeFilters (for native portals)
+extern "C" void _ZN18QFileDialogOptions18setMimeTypeFiltersERK11QStringList(void *self, const QStringList &filters)
+{
+    static auto orig = (void (*)(void *, const QStringList &))dlsym(RTLD_NEXT, "_ZN18QFileDialogOptions18setMimeTypeFiltersERK11QStringList");
+    QStringList updated = filters;
+    if (!updated.contains("image/svg+xml"))
+        updated.append(QStringLiteral("image/svg+xml"));
+    if (!updated.contains("image/vnd.microsoft.icon"))
+        updated.append(QStringLiteral("image/vnd.microsoft.icon"));
+
+    if (orig)
+    {
+        orig(self, updated);
+    }
+}
+
+// 24. Hook QMimeType::comment
+extern "C" QString _ZNK9QMimeType7commentEv(const void *self)
+{
+    static auto orig = (QString (*)(const void *))dlsym(RTLD_NEXT, "_ZNK9QMimeType7commentEv");
+    QString desc = orig ? orig(self) : QString();
+    if (desc.contains("Krita", Qt::CaseInsensitive))
+    {
+        desc.replace("Krita belgesi", "RL Studio belgesi (*.rls)");
+        desc.replace("Krita document", "RL Studio document (*.rls)");
+        desc.replace("Krita Document", "RL Studio Document (*.rls)");
+        desc.replace("Krita", "RL Studio");
+    }
+    return desc;
+}
+
+// 25. Hook QMimeType::filterString
+extern "C" QString _ZNK9QMimeType12filterStringEv(const void *self)
+{
+    static auto orig = (QString (*)(const void *))dlsym(RTLD_NEXT, "_ZNK9QMimeType12filterStringEv");
+    QString s = orig ? orig(self) : QString();
+    if (s.contains("Krita", Qt::CaseInsensitive) || s.contains(".kra"))
+    {
+        s.replace("Krita belgesi (*.kra)", "RL Studio belgesi (*.rls)");
+        s.replace("Krita belgesi", "RL Studio belgesi (*.rls)");
+        s.replace("Krita document", "RL Studio document (*.rls)");
+        s.replace("Krita Document", "RL Studio Document (*.rls)");
+        s.replace("*.kra", "*.rls");
+        s.replace("Krita", "RL Studio");
+    }
+    return s;
+}
+
+// 26. Hook QSvgWidget to suppress Krita splash banner overlay ("25 years of KRITA")
+typedef void (*SvgWidgetLoadFn)(void *, const QString &);
+static SvgWidgetLoadFn orig_svgWidgetLoad = nullptr;
+
+extern "C" void _ZN10QSvgWidget4loadERK7QString(void *self, const QString &file)
+{
+    if (!orig_svgWidgetLoad)
+    {
+        orig_svgWidgetLoad = (SvgWidgetLoadFn)dlsym(RTLD_NEXT, "_ZN10QSvgWidget4loadERK7QString");
+    }
+    QString f = file;
+    if (f.contains("banner.svg"))
+    {
+        f = QStringLiteral("/tmp/s1.svg");
+    }
+    if (orig_svgWidgetLoad)
+    {
+        orig_svgWidgetLoad(self, f);
+    }
+}
+
+typedef void (*SvgWidgetCtorFn)(void *, const QString &, QWidget *);
+static SvgWidgetCtorFn orig_svgWidgetCtor1 = nullptr;
+static SvgWidgetCtorFn orig_svgWidgetCtor2 = nullptr;
+
+extern "C" void _ZN10QSvgWidgetC1ERK7QStringP7QWidget(void *self, const QString &file, QWidget *parent)
+{
+    if (!orig_svgWidgetCtor1)
+    {
+        orig_svgWidgetCtor1 = (SvgWidgetCtorFn)dlsym(RTLD_NEXT, "_ZN10QSvgWidgetC1ERK7QStringP7QWidget");
+    }
+    QString f = file;
+    if (f.contains("banner.svg"))
+    {
+        f = QStringLiteral("/tmp/s1.svg");
+    }
+    if (orig_svgWidgetCtor1)
+    {
+        orig_svgWidgetCtor1(self, f, parent);
+    }
+}
+
+extern "C" void _ZN10QSvgWidgetC2ERK7QStringP7QWidget(void *self, const QString &file, QWidget *parent)
+{
+    if (!orig_svgWidgetCtor2)
+    {
+        orig_svgWidgetCtor2 = (SvgWidgetCtorFn)dlsym(RTLD_NEXT, "_ZN10QSvgWidgetC2ERK7QStringP7QWidget");
+    }
+    QString f = file;
+    if (f.contains("banner.svg"))
+    {
+        f = QStringLiteral("/tmp/s1.svg");
+    }
+    if (orig_svgWidgetCtor2)
+    {
+        orig_svgWidgetCtor2(self, f, parent);
+    }
 }
