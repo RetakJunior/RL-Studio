@@ -13,7 +13,7 @@ APPIMAGE_CANDIDATES = [
     "/usr/local/bin/RLStudio-x86_64.AppImage",
 ]
 
-RELEASE_URL = "https://github.com/RetakJunior/RL-Studio/releases/download/v1.1.5/RLStudio-x86_64.AppImage"
+RELEASE_URL = "https://github.com/RetakJunior/RL-Studio/releases/download/v1.6.3/RLStudio-x86_64.AppImage"
 
 def download_appimage():
     """Automatically download the AppImage on first launch."""
