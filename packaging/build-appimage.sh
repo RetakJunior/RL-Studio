@@ -111,6 +111,12 @@ if [ -d "/usr/share/krita" ]; then
     cp "${PACKAGING_DIR}/assets/splash.png" "${APPDIR}/usr/share/krita/pics/splash.png"
     cp "${PACKAGING_DIR}/assets/splash.png" "${APPDIR}/usr/share/krita/pics/splash_screen.png"
     cp "${PACKAGING_DIR}/assets/splash.png" "${APPDIR}/usr/share/krita/pics/0.png"
+
+    # Bundle RL Studio 3D Models & Reference Plugin
+    echo "==> Bundling RL Studio 3D Models & Reference Plugin..."
+    mkdir -p "${APPDIR}/usr/share/krita/pykrita"
+    cp -r "${PACKAGING_DIR}/plugins/pykrita/rlstudio_3d" "${APPDIR}/usr/share/krita/pykrita/"
+    cp "${PACKAGING_DIR}/plugins/pykrita/kritapykrita_rlstudio_3d.desktop" "${APPDIR}/usr/share/krita/pykrita/"
 fi
 
 if [ -d "/usr/share/color" ]; then

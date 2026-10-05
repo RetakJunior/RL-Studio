@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=rlstudio_3d
+X-Python-2-Compatible=false
+Name=3D Referans & Modeller
+Name[en]=3D Reference & Models
+Name[tr]=3D Referans & Modeller
+Comment=3D poseable mannequin, anatomy and perspective reference docker for RL Studio
+Comment[tr]=RL Studio için 3B manken, anatomi ve perspektif referans paneli
