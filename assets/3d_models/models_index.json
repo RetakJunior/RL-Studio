@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "updated": "2026-10-05",
+  "categories": [
+    {
+      "id": "anatomy",
+      "name": "İnsan & Anatomi",
+      "models": [
+        {
+          "id": "builtin_head",
+          "title": "Asaro / Düzlem Kafa Modeli",
+          "category": "anatomy",
+          "filename": "mannequin_head.obj",
+          "is_builtin": true,
+          "description": "Işık ve açı çalışması için düzlemsel insan kafası.",
+          "license": "CC0"
+        },
+        {
+          "id": "builtin_body",
+          "title": "Temel Manken Gövdesi",
+          "category": "anatomy",
+          "filename": "mannequin_body.obj",
+          "is_builtin": true,
+          "description": "Poz ve oran orantı için temel insan mankeni.",
+          "license": "CC0"
+        }
+      ]
+    },
+    {
+      "id": "perspective",
+      "name": "Perspektif & Formlar",
+      "models": [
+        {
+          "id": "builtin_cube",
+          "title": "3 Noktalı Perspektif Küpü",
+          "category": "perspective",
+          "filename": "perspective_cube.obj",
+          "is_builtin": true,
+          "description": "Kaçış noktaları ve mekan perspektifi kılavuz küpü.",
+          "license": "CC0"
+        }
+      ]
+    },
+    {
+      "id": "environments",
+      "name": "Mekan & Ortam",
+      "models": []
+    },
+    {
+      "id": "custom",
+      "name": "Özel Modellerim",
+      "models": []
+    }
+  ]
+}
