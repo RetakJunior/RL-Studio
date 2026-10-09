@@ -95,6 +95,13 @@ if [ -d "/usr/lib/x86_64-linux-gnu/kritaplugins" ]; then
     cp -a /usr/lib/x86_64-linux-gnu/kritaplugins/* "${APPDIR}/usr/lib/x86_64-linux-gnu/kritaplugins/" 2>/dev/null || true
 fi
 
+if [ -d "/usr/lib/x86_64-linux-gnu/krita-python-libs" ]; then
+    echo "==> Bundling Krita Python Libs (PyKrita & SIP)..."
+    cp -a /usr/lib/x86_64-linux-gnu/krita-python-libs "${APPDIR}/usr/lib/x86_64-linux-gnu/" 2>/dev/null || true
+fi
+cp -a /usr/lib/x86_64-linux-gnu/libpython3.13.so* "${APPDIR}/usr/lib/x86_64-linux-gnu/" 2>/dev/null || true
+cp -a /usr/lib/x86_64-linux-gnu/libpython3*.so* "${APPDIR}/usr/lib/x86_64-linux-gnu/" 2>/dev/null || true
+
 # 7. Apply Native Rebranding Patches (libkritaui + .rls extension plugins)
 echo "==> Applying native branding patches..."
 TARGET_LIB="${APPDIR}/usr/lib/x86_64-linux-gnu/libkritaui.so.19.0.0"

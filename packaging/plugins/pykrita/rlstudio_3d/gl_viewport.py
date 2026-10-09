@@ -6,11 +6,14 @@ and high-resolution canvas snapshot rendering.
 """
 
 import math
+import ctypes
+from array import array
+from PyQt5 import sip
 from PyQt5.QtWidgets import QOpenGLWidget
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal
 from PyQt5.QtGui import (
     QMatrix4x4, QVector3D, QColor, QImage, QPainter,
-    QOpenGLShader, QOpenGLShaderProgram, QSurfaceFormat
+    QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram, QSurfaceFormat, QPalette
 )
 
 VERTEX_SHADER_SRC = """#version 120
@@ -71,12 +74,45 @@ void main() {
 }
 """
 
+
+class _OpenGLFunctions:
+    """Resolve the small set of GL calls needed by this widget through Qt.
+
+    PyQt5 intentionally does not expose ``QOpenGLContext.functions()``. Qt's
+    ``getProcAddress()`` is available in Krita's bundled PyQt and keeps these
+    calls tied to the active context without requiring PyOpenGL.
+    """
+
+    _SIGNATURES = {
+        "glEnable": (ctypes.c_uint,),
+        "glDepthFunc": (ctypes.c_uint,),
+        "glBlendFunc": (ctypes.c_uint, ctypes.c_uint),
+        "glViewport": (ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int),
+        "glClearColor": (ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float),
+        "glClear": (ctypes.c_uint,),
+        "glLineWidth": (ctypes.c_float,),
+        "glDrawArrays": (ctypes.c_uint, ctypes.c_int, ctypes.c_int),
+    }
+
+    def __init__(self, context):
+        for name, argtypes in self._SIGNATURES.items():
+            pointer = context.getProcAddress(name.encode("ascii"))
+            if not pointer:
+                raise RuntimeError("OpenGL function is unavailable: {}".format(name))
+
+            function_type = ctypes.CFUNCTYPE(None, *argtypes)
+            setattr(self, name, function_type(int(pointer)))
+
+
 class GLViewport3D(QOpenGLWidget):
     camera_updated = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.mesh = None
+        self._mesh_buffer_dirty = False
+        self._mesh_vertex_bytes = 0
+        self._transparent_background = False
 
         # Camera parameters
         self.distance = 3.5
@@ -99,6 +135,8 @@ class GLViewport3D(QOpenGLWidget):
         self.setFocusPolicy(Qt.StrongFocus)
 
         # GL shader program
+        self._gl = None
+        self.vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
         self.program = None
         self.loc_mvp = -1
         self.loc_mv = -1
@@ -109,6 +147,7 @@ class GLViewport3D(QOpenGLWidget):
 
     def set_mesh(self, mesh):
         self.mesh = mesh
+        self._mesh_buffer_dirty = mesh is not None
         self.update()
 
     def set_render_mode(self, mode):
@@ -130,7 +169,13 @@ class GLViewport3D(QOpenGLWidget):
 
     def initializeGL(self):
         # Setup GL parameters
-        gl = self.context().functions()
+        self._gl = _OpenGLFunctions(self.context())
+        gl = self._gl
+        if not self.vertex_buffer.create():
+            self.program = None
+            return
+        self.vertex_buffer.setUsagePattern(QOpenGLBuffer.StaticDraw)
+
         gl.glEnable(0x0B71) # GL_DEPTH_TEST
         gl.glDepthFunc(0x0203) # GL_LEQUAL
         gl.glEnable(0x0BE2) # GL_BLEND
@@ -138,9 +183,22 @@ class GLViewport3D(QOpenGLWidget):
 
         # Compile Shader Program
         self.program = QOpenGLShaderProgram()
-        self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, VERTEX_SHADER_SRC)
-        self.program.addShaderFromSourceCode(QOpenGLShader.Fragment, FRAGMENT_SHADER_SRC)
-        self.program.link()
+        if not self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, VERTEX_SHADER_SRC):
+            print("[RL Studio 3D] Vertex shader error: {}".format(self.program.log()))
+            self.program = None
+            return
+        if not self.program.addShaderFromSourceCode(QOpenGLShader.Fragment, FRAGMENT_SHADER_SRC):
+            print("[RL Studio 3D] Fragment shader error: {}".format(self.program.log()))
+            self.program = None
+            return
+
+        # Attribute indexes must match the VBO layout on every OpenGL driver.
+        self.program.bindAttributeLocation("a_position", 0)
+        self.program.bindAttributeLocation("a_normal", 1)
+        if not self.program.link():
+            print("[RL Studio 3D] Shader link error: {}".format(self.program.log()))
+            self.program = None
+            return
 
         self.loc_mvp = self.program.uniformLocation("u_mvp")
         self.loc_mv = self.program.uniformLocation("u_modelview")
@@ -150,7 +208,9 @@ class GLViewport3D(QOpenGLWidget):
         self.loc_color = self.program.uniformLocation("u_basecolor")
 
     def resizeGL(self, w, h):
-        gl = self.context().functions()
+        gl = self._gl
+        if gl is None:
+            return
         gl.glViewport(0, 0, w, h)
 
     def _get_light_dir(self):
@@ -161,10 +221,31 @@ class GLViewport3D(QOpenGLWidget):
         z = math.cos(rad_p) * math.cos(rad_y)
         return QVector3D(x, y, z).normalized()
 
+    def _upload_mesh(self):
+        """Upload position and normal data once through Qt's supported VBO API."""
+        if not self.mesh or not self.mesh.vertices or not self.mesh.normals:
+            return False
+
+        data = array("f", self.mesh.vertices)
+        self._mesh_vertex_bytes = len(data) * data.itemsize
+        data.extend(self.mesh.normals)
+        pointer, count = data.buffer_info()
+
+        if not self.vertex_buffer.bind():
+            return False
+        self.vertex_buffer.allocate(sip.voidptr(pointer), count * data.itemsize)
+        self.vertex_buffer.release()
+        self._mesh_buffer_dirty = False
+        return True
+
     def paintGL(self):
-        gl = self.context().functions()
-        # RL Studio Deep Slate background: #1a1e24
-        gl.glClearColor(0.10, 0.12, 0.15, 1.0)
+        gl = self._gl
+        if gl is None:
+            return
+        # Match the host application's workspace instead of drawing a separate dark panel.
+        background = self.palette().color(QPalette.Window)
+        alpha = 0.0 if self._transparent_background else 1.0
+        gl.glClearColor(background.redF(), background.greenF(), background.blueF(), alpha)
         gl.glClear(0x00004000 | 0x00000100) # GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT
 
         if not self.mesh or not self.program:
@@ -197,12 +278,19 @@ class GLViewport3D(QOpenGLWidget):
         self.program.setUniformValue(self.loc_mode, self.render_mode)
         self.program.setUniformValue(self.loc_color, self.base_color)
 
+        if self._mesh_buffer_dirty and not self._upload_mesh():
+            self.program.release()
+            return
+        if not self.vertex_buffer.bind():
+            self.program.release()
+            return
+
         self.program.enableAttributeArray(0)
         self.program.enableAttributeArray(1)
 
-        # Feed vertex and normal data
-        self.program.setAttributeArray(0, 0x1406, self.mesh.vertices, 3, 0)
-        self.program.setAttributeArray(1, 0x1406, self.mesh.normals, 3, 0)
+        # Position and normal attributes are separate blocks in the VBO.
+        self.program.setAttributeBuffer(0, 0x1406, 0, 3, 0)
+        self.program.setAttributeBuffer(1, 0x1406, self._mesh_vertex_bytes, 3, 0)
 
         if self.render_mode == 1:
             # Wireframe drawing
@@ -215,6 +303,7 @@ class GLViewport3D(QOpenGLWidget):
 
         self.program.disableAttributeArray(0)
         self.program.disableAttributeArray(1)
+        self.vertex_buffer.release()
         self.program.release()
 
     def mousePressEvent(self, event):
@@ -251,8 +340,14 @@ class GLViewport3D(QOpenGLWidget):
 
     def capture_snapshot(self, transparent_bg=True):
         """Renders the current 3D view to a transparent QImage for Krita canvas."""
-        img = self.grabFramebuffer()
+        previous_background = self._transparent_background
+        self._transparent_background = transparent_bg
+        try:
+            img = self.grabFramebuffer()
+        finally:
+            self._transparent_background = previous_background
+            self.update()
         if transparent_bg:
-            # Convert dark background pixels to transparent for drawing layer overlay
+            # Preserve the alpha channel cleared by paintGL for a clean canvas overlay.
             img = img.convertToFormat(QImage.Format_ARGB32_Premultiplied)
         return img
