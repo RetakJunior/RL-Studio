@@ -196,6 +196,19 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $toolchain.FullName "bin")
           Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $toolchain.FullName "x86_64-w64-mingw32\bin")
 
+      - name: Install ccache
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "ccache.zip"
+          $install = Join-Path $env:RUNNER_TEMP "ccache"
+          Invoke-WebRequest "https://github.com/ccache/ccache/releases/download/v4.14.3/ccache-4.14.3-windows-x86_64.zip" -OutFile $archive
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne "c845c3d65be81954c75659145a522a793a27586bf940c5dcfe18af33fa1a67dd") { throw "ccache archive SHA256 mismatch" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $install -Force
+          $ccacheExe = Get-ChildItem -LiteralPath $install -Recurse -Filter "ccache.exe" | Select-Object -First 1
+          if (-not $ccacheExe) { throw "ccache.exe was not found in the release archive" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $ccacheExe.DirectoryName
+
       - name: Prepare dependencies and build installer
         shell: pwsh
         run: |
@@ -225,7 +238,7 @@ jobs:
 
   macos-disk-image:
     name: macOS disk image
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 360
     env:
       BRANDING: RLStudio
@@ -245,6 +258,7 @@ jobs:
       KDECI_CC_CACHE: ${{ github.workspace }}/.cache/krita-ccache
       MACOSX_DEPLOYMENT_TARGET: "10.15"
       QMAKE_MACOSX_DEPLOYMENT_TARGET: "10.15"
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
     steps:
       - name: Check out source
         uses: actions/checkout@v4
