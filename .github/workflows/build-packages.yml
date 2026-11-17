@@ -1,0 +1,288 @@
+name: Build RL Studio packages
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    container:
+      image: storage.kde.org/vm-images/krita-appimage-2204
+    timeout-minutes: 360
+    env:
+      BRANDING: RLStudio
+      CI_PROJECT_DIR: ${{ github.workspace }}
+      CI_PROJECT_NAME: krita
+      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+      CI_COMMIT_BRANCH: ${{ github.ref_name }}
+      CI_COMMIT_SHORT_SHA: ${{ github.sha }}
+      KDECI_BUILD_TYPE: Release
+      KDECI_ONLY_BUILD: "True"
+      KDECI_EXTRA_CMAKE_ARGS: "-DHIDE_SAFE_ASSERTS=ON -DBUILD_TESTING=OFF -DBRANDING=RLStudio"
+      KDECI_COMPRESS_PACKAGES_ON_DOWNLOAD: "False"
+      KDECI_GITLAB_SERVER: https://invent.kde.org/
+      KDECI_PACKAGE_PROJECT: teams/ci-artifacts/krita-appimage
+      KDECI_REPO_METADATA_PATH: ${{ github.workspace }}/krita-deps-management/repo-metadata
+      KDECI_CACHE_PATH: ${{ github.workspace }}/.cache/krita-artifacts
+      KDECI_CC_CACHE: ${{ github.workspace }}/.cache/krita-ccache
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build portable AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-deps-management.git
+          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-ci-utilities.git krita-deps-management/ci-utilities
+          python3 -m venv venv --upgrade-deps
+          source venv/bin/activate
+          python -m pip install -r krita-deps-management/requirements.txt
+          python -u krita-deps-management/tools/replace-branch-in-seed-file.py krita-deps-management/latest/krita-deps.yml -p -o branch-corrected-deps.yml -d master
+          python -u krita-deps-management/tools/generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
+          mkdir -p "$KDECI_CACHE_PATH" "$KDECI_CC_CACHE"
+          unset VIRTUAL_ENV
+          python3 -u krita-deps-management/ci-utilities/run-ci-build.py --project "$CI_PROJECT_NAME" --branch main --platform Linux/Qt5/Shared --skip-publishing
+          python3 -u build-tools/ci-scripts/build-appimage.py
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git rev-parse --short HEAD)"
+          fi
+          image="$(find _packaging -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$image"
+          target="_packaging/RLStudio-${version}-x86_64.AppImage"
+          if [[ "$image" != "$target" ]]; then mv "$image" "$target"; fi
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RLStudio-Linux-AppImage
+          path: _packaging/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-appimage-smoke:
+    name: AppImage startup (${{ matrix.distro }})
+    needs: linux-appimage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: Ubuntu 22.04
+            image: ubuntu:22.04
+          - distro: Fedora
+            image: fedora:latest
+          - distro: Arch Linux
+            image: archlinux:latest
+    steps:
+      - name: Download AppImage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: RLStudio-Linux-AppImage
+          path: dist
+
+      - name: Launch AppImage in ${{ matrix.distro }}
+        shell: bash
+        env:
+          CONTAINER_IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          image="$(find dist -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$image"
+          image_name="$(basename "$image")"
+          chmod +x "$image"
+          cat > "$RUNNER_TEMP/rlstudio-appimage-smoke.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          case "$CONTAINER_IMAGE" in
+            ubuntu:*) apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb xauth xdotool fonts-dejavu-core ;;
+            fedora:*) dnf install -y xorg-x11-server-Xvfb xorg-x11-xauth xdotool dejavu-sans-fonts ;;
+            archlinux:*) pacman -Syu --noconfirm xorg-server-xvfb xorg-xauth xdotool ttf-dejavu ;;
+          esac
+          cd /work
+          export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1
+          xvfb-run -a "./$IMAGE_NAME" --version
+          xvfb-run -a bash -c '
+            export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1
+            "./$IMAGE_NAME" >/tmp/rlstudio-startup.log 2>&1 &
+            app_pid=$!
+            ready=0
+            for attempt in $(seq 1 60); do
+              if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/rlstudio-startup.log; exit 1; fi
+              if xdotool search --onlyvisible --name "RL Studio" >/dev/null 2>&1; then ready=1; break; fi
+              sleep 2
+            done
+            if [ "$ready" -ne 1 ]; then cat /tmp/rlstudio-startup.log; kill "$app_pid" 2>/dev/null || true; exit 1; fi
+            kill "$app_pid"
+            wait "$app_pid" 2>/dev/null || true
+          '
+          SCRIPT
+          docker run --rm --shm-size=2g \
+            -e CONTAINER_IMAGE="$CONTAINER_IMAGE" \
+            -e IMAGE_NAME="$image_name" \
+            -v "$GITHUB_WORKSPACE/dist:/work:ro" \
+            -v "$RUNNER_TEMP/rlstudio-appimage-smoke.sh:/tmp/rlstudio-appimage-smoke.sh:ro" \
+            "$CONTAINER_IMAGE" bash /tmp/rlstudio-appimage-smoke.sh
+
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-2022
+    timeout-minutes: 360
+    env:
+      BRANDING: RLStudio
+      CI_PROJECT_DIR: ${{ github.workspace }}
+      CI_PROJECT_NAME: krita
+      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+      CI_COMMIT_BRANCH: ${{ github.ref_name }}
+      CI_COMMIT_SHORT_SHA: ${{ github.sha }}
+      PYTHONUTF8: "1"
+      KDECI_BUILD_TYPE: Release
+      KDECI_ONLY_BUILD: "True"
+      KDECI_EXTRA_CMAKE_ARGS: "-DHIDE_SAFE_ASSERTS=ON -DBUILD_TESTING=OFF -DBRANDING=RLStudio"
+      KDECI_COMPRESS_PACKAGES_ON_DOWNLOAD: "False"
+      KDECI_GITLAB_SERVER: https://invent.kde.org/
+      KDECI_PACKAGE_PROJECT: teams/ci-artifacts/krita-windows
+      KDECI_REPO_METADATA_PATH: ${{ github.workspace }}/krita-deps-management/repo-metadata
+      KDECI_CACHE_PATH: ${{ github.workspace }}/.cache/krita-artifacts
+      KDECI_CC_CACHE: ${{ github.workspace }}/.cache/krita-ccache
+      KRITACI_SKIP_DEBUG_PACKAGE: "True"
+      KRITACI_BUILD_INSTALLERS: "True"
+      KRITACI_RELEASE_PACKAGE_NAMING: ${{ github.ref_type == 'tag' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install CMake and Ninja
+        shell: pwsh
+        run: |
+          choco install cmake --version=3.31.6 --yes --allow-downgrade
+          choco install ninja --yes
+
+      - name: Install LLVM MinGW toolchain
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "llvm-mingw.zip"
+          $root = "C:\llvm-mingw"
+          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/20251118/llvm-mingw-20251118-ucrt-x86_64.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $root -Force
+          $toolchain = Get-ChildItem -LiteralPath $root -Directory | Select-Object -First 1
+          if (-not $toolchain) { throw "LLVM MinGW archive did not contain a toolchain directory" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $toolchain.FullName "bin")
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $toolchain.FullName "x86_64-w64-mingw32\bin")
+
+      - name: Prepare dependencies and build installer
+        shell: pwsh
+        run: |
+          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-deps-management.git
+          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-ci-utilities.git krita-deps-management/ci-utilities
+          python -m venv venv --upgrade-deps
+          .\venv\Scripts\python.exe -m pip install -r krita-deps-management\requirements.txt
+          .\venv\Scripts\python.exe -m pip install -r krita-deps-management\ci-utilities\requirements-windows.txt
+          .\venv\Scripts\python.exe -u krita-deps-management\tools\replace-branch-in-seed-file.py krita-deps-management\latest\krita-deps.yml -p -o branch-corrected-deps.yml -d master
+          .\venv\Scripts\python.exe -u krita-deps-management\tools\generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
+          New-Item -ItemType Directory -Force -Path $env:KDECI_CACHE_PATH, $env:KDECI_CC_CACHE | Out-Null
+          $env:PATH = "C:\llvm-mingw\llvm-mingw-20251118-ucrt-x86_64\bin;C:\llvm-mingw\llvm-mingw-20251118-ucrt-x86_64\x86_64-w64-mingw32\bin;$env:PATH"
+          .\venv\Scripts\python.exe -u krita-deps-management\ci-utilities\run-ci-build.py --project $env:CI_PROJECT_NAME --branch main --platform Windows/Qt5/Shared --skip-publishing
+          .\venv\Scripts\python.exe -u build-tools\ci-scripts\build-windows-package.py --skip-debug-package --build-installers
+          $installer = Get-ChildItem -File "*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not produced" }
+          if ($env:GITHUB_REF_TYPE -eq "tag") { $version = $env:GITHUB_REF_NAME.Substring(1) } else { $version = $env:GITHUB_SHA.Substring(0, 7) }
+          Rename-Item -LiteralPath $installer.FullName -NewName "RLStudio-$version-setup.exe"
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RLStudio-Windows-Installer
+          path: RLStudio-*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  macos-disk-image:
+    name: macOS disk image
+    runs-on: macos-15-intel
+    timeout-minutes: 360
+    env:
+      BRANDING: RLStudio
+      CI_PROJECT_DIR: ${{ github.workspace }}
+      CI_PROJECT_NAME: krita
+      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+      CI_COMMIT_BRANCH: ${{ github.ref_name }}
+      CI_COMMIT_SHORT_SHA: ${{ github.sha }}
+      KDECI_BUILD_TYPE: Release
+      KDECI_ONLY_BUILD: "True"
+      KDECI_EXTRA_CMAKE_ARGS: "-DHIDE_SAFE_ASSERTS=ON -DBUILD_TESTING=OFF -DBRANDING=RLStudio -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/krita-deps-management/tools/macos-toolchain-krita.cmake"
+      KDECI_COMPRESS_PACKAGES_ON_DOWNLOAD: "False"
+      KDECI_GITLAB_SERVER: https://invent.kde.org/
+      KDECI_PACKAGE_PROJECT: teams/ci-artifacts/krita-macos
+      KDECI_REPO_METADATA_PATH: ${{ github.workspace }}/krita-deps-management/repo-metadata
+      KDECI_CACHE_PATH: ${{ github.workspace }}/.cache/krita-artifacts
+      KDECI_CC_CACHE: ${{ github.workspace }}/.cache/krita-ccache
+      MACOSX_DEPLOYMENT_TARGET: "10.15"
+      QMAKE_MACOSX_DEPLOYMENT_TARGET: "10.15"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build app bundle and disk image
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-deps-management.git
+          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-ci-utilities.git krita-deps-management/ci-utilities
+          python3 -m venv venv --upgrade-deps
+          source venv/bin/activate
+          python -m pip install -r krita-deps-management/requirements.txt
+          python3 -u krita-deps-management/tools/download-macos-tools.py
+          source _krita-tools/activate
+          python3 -u krita-deps-management/tools/replace-branch-in-seed-file.py krita-deps-management/latest/krita-deps.yml -p -o branch-corrected-deps.yml -d master
+          python3 -u krita-deps-management/tools/generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
+          mkdir -p "$KDECI_CACHE_PATH" "$KDECI_CC_CACHE"
+          unset VIRTUAL_ENV
+          python3 -u krita-deps-management/ci-utilities/run-ci-build.py --project "$CI_PROJECT_NAME" --branch main --platform MacOS/Qt5/Shared --skip-publishing
+          mkdir -p _dmg
+          python3 -u packaging/macos/macos-deploy.py --install-dir ./_install --output-dir "$GITHUB_WORKSPACE/_dmg" --krita-source "$GITHUB_WORKSPACE"
+          app_bundle="$(find _dmg -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app_bundle"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git rev-parse --short HEAD)"
+          fi
+          python3 -u packaging/macos/macos-apptodmg.py "$GITHUB_WORKSPACE/$app_bundle" --media-path ./packaging/macos --dmg_name "RLStudio-${version}"
+          dmg="$(find _packaging -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          mv "$dmg" "_packaging/RLStudio-${version}.dmg"
+
+      - name: Upload macOS disk image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RLStudio-macOS-DMG
+          path: _packaging/RLStudio-*.dmg
+          if-no-files-found: error
+          retention-days: 14
