@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   linux-appimage:
@@ -35,6 +35,9 @@ jobs:
           cp -a "$GITHUB_WORKSPACE/.git" "$env_root/persistent/krita/.git"
           cd "$env_root"
 
+          sudo apt-get update
+          sudo apt-get install --yes ccache
+
           # KDE's official Docker environment bootstraps the pinned Qt/KDE dependencies.
           ./bin/bootstrap-deps.sh
 
@@ -52,8 +55,8 @@ jobs:
             --env GITHUB_REF_NAME="$GITHUB_REF_NAME" \
             --workdir /home/appimage/appimage-workspace/krita-build \
             rlstudio-appimage-builder /bin/bash -lc '
-              set -euo pipefail
               source ~/devenv.inc
+              set -euo pipefail
               ~/bin/run_cmake.sh ~/persistent/krita \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DHIDE_SAFE_ASSERTS=ON \
