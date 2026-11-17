@@ -19,25 +19,7 @@ jobs:
   linux-appimage:
     name: Linux AppImage
     runs-on: ubuntu-22.04
-    container:
-      image: storage.kde.org/vm-images/krita-appimage-2204
     timeout-minutes: 360
-    env:
-      BRANDING: RLStudio
-      CI_PROJECT_DIR: ${{ github.workspace }}
-      CI_PROJECT_NAME: krita
-      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
-      CI_COMMIT_BRANCH: ${{ github.ref_name }}
-      CI_COMMIT_SHORT_SHA: ${{ github.sha }}
-      KDECI_BUILD_TYPE: Release
-      KDECI_ONLY_BUILD: "True"
-      KDECI_EXTRA_CMAKE_ARGS: "-DHIDE_SAFE_ASSERTS=ON -DBUILD_TESTING=OFF -DBRANDING=RLStudio"
-      KDECI_COMPRESS_PACKAGES_ON_DOWNLOAD: "False"
-      KDECI_GITLAB_SERVER: https://invent.kde.org/
-      KDECI_PACKAGE_PROJECT: teams/ci-artifacts/krita-appimage
-      KDECI_REPO_METADATA_PATH: ${{ github.workspace }}/krita-deps-management/repo-metadata
-      KDECI_CACHE_PATH: ${{ github.workspace }}/.cache/krita-artifacts
-      KDECI_CC_CACHE: ${{ github.workspace }}/.cache/krita-ccache
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -46,26 +28,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-deps-management.git
-          git clone --depth=1 --branch master https://invent.kde.org/packaging/krita-ci-utilities.git krita-deps-management/ci-utilities
-          python3 -m venv venv --upgrade-deps
-          source venv/bin/activate
-          python -m pip install -r krita-deps-management/requirements.txt
-          python -u krita-deps-management/tools/replace-branch-in-seed-file.py krita-deps-management/latest/krita-deps.yml -p -o branch-corrected-deps.yml -d master
-          python -u krita-deps-management/tools/generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
-          mkdir -p "$KDECI_CACHE_PATH" "$KDECI_CC_CACHE"
-          unset VIRTUAL_ENV
-          python3 -u krita-deps-management/ci-utilities/run-ci-build.py --project "$CI_PROJECT_NAME" --branch main --platform Linux/Qt5/Shared --skip-publishing
-          python3 -u build-tools/ci-scripts/build-appimage.py
+          env_root="$RUNNER_TEMP/krita-docker-env"
+          git clone --depth=1 https://invent.kde.org/dkazakov/krita-docker-env.git "$env_root"
+          mkdir -p "$env_root/persistent/krita"
+          git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$env_root/persistent/krita"
+          cp -a "$GITHUB_WORKSPACE/.git" "$env_root/persistent/krita/.git"
+          cd "$env_root"
+
+          # KDE's official Docker environment bootstraps the pinned Qt/KDE dependencies.
+          ./bin/bootstrap-deps.sh
+
+          # Build only the reusable base image; the dependencies are mounted at runtime.
+          printf 'persistent/\n' > .dockerignore
+          ./bin/build_image --skip-deps rlstudio-appimage-builder
+          docker run --detach --name rlstudio-appimage-builder --shm-size=2g \
+            --volume "$env_root/persistent:/home/appimage/persistent" \
+            --volume "$env_root/persistent/deps/_install:/home/appimage/appimage-workspace/deps/usr:ro" \
+            rlstudio-appimage-builder
+
+          docker exec \
+            --env BRANDING=RLStudio \
+            --env GITHUB_REF_TYPE="$GITHUB_REF_TYPE" \
+            --env GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+            --workdir /home/appimage/appimage-workspace/krita-build \
+            rlstudio-appimage-builder /bin/bash -lc '
+              set -euo pipefail
+              source ~/devenv.inc
+              ~/bin/run_cmake.sh ~/persistent/krita \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DHIDE_SAFE_ASSERTS=ON \
+                -DBUILD_TESTING=OFF \
+                -DBRANDING=RLStudio
+              ~/bin/build_krita_appimage.sh -j"$(nproc)"
+            '
+
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="$(git rev-parse --short HEAD)"
+            version="${GITHUB_SHA:0:7}"
           fi
-          image="$(find _packaging -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          image="$(find "$env_root/persistent" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$image"
-          target="_packaging/RLStudio-${version}-x86_64.AppImage"
-          if [[ "$image" != "$target" ]]; then mv "$image" "$target"; fi
+          mkdir -p "$GITHUB_WORKSPACE/_packaging"
+          mv "$image" "$GITHUB_WORKSPACE/_packaging/RLStudio-${version}-x86_64.AppImage"
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
