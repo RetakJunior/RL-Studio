@@ -1,0 +1,12 @@
+<!DOCTYPE RCC>
+<!--
+  SPDX-FileCopyrightText: none
+  SPDX-License-Identifier: CC0-1.0
+-->
+<RCC version="1.0">
+    <qresource prefix="/splash">
+        <file>banner.svg</file>
+        <file alias="hd.png">rlstudio_splash.png</file>
+    </qresource>
+</RCC>
+
