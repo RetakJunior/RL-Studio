@@ -1236,6 +1236,7 @@ bool KisResourceCacheDb::addResource(KisResourceStorageSP storage, QDateTime tim
 bool KisResourceCacheDb::addResources(KisResourceStorageSP storage, QString resourceType)
 {
     QSqlDatabase::database().transaction();
+    bool success = true;
     QSharedPointer<KisResourceStorage::ResourceIterator> iter = storage->resources(resourceType);
     while (iter->hasNext()) {
         iter->next();
@@ -1258,10 +1259,12 @@ bool KisResourceCacheDb::addResources(KisResourceStorageSP storage, QString reso
                         resourceId = resource->resourceId();
                     } else {
                         qWarning() << "Could not add resource" << resource->filename() << "to the database";
+                        success = false;
                     }
                 } else {
                     if (!addResourceVersion(resourceId, iter->lastModified(), storage, resource)) {
                         qWarning() << "Could not add resource version" << resource->filename() << "to the database";
+                        success = false;
                     }
                 }
             }
@@ -1272,7 +1275,7 @@ bool KisResourceCacheDb::addResources(KisResourceStorageSP storage, QString reso
     } else {
         QSqlDatabase::database().rollback();
     }
-    return true;
+    return success;
 }
 
 bool KisResourceCacheDb::setResourceActive(int resourceId, bool active)
@@ -1576,6 +1579,7 @@ bool KisResourceCacheDb::addTag(const QString &resourceType, const QString stora
 bool KisResourceCacheDb::addTags(KisResourceStorageSP storage, QString resourceType)
 {
     QSqlDatabase::database().transaction();
+    bool success = true;
     QSharedPointer<KisResourceStorage::TagIterator> iter = storage->tags(resourceType);
     while(iter->hasNext()) {
         iter->next();
@@ -1583,12 +1587,14 @@ bool KisResourceCacheDb::addTags(KisResourceStorageSP storage, QString resourceT
         if (tag && tag->valid()) {
             if (!addTag(resourceType, storage->location(), tag)) {
                 qWarning() << "Could not add tag" << tag << "to the database";
+                success = false;
                 continue;
             }
             if (!tag->defaultResources().isEmpty()) {
                 Q_FOREACH(const QString &resourceFileName, tag->defaultResources()) {
                     if (!tagResource(resourceFileName, tag, resourceType)) {
                         qWarning() << "Could not tag resource" << QFileInfo(resourceFileName).baseName() << "from" << storage->name() << "filename" << resourceFileName << "with tag" << iter->tag();
+                        success = false;
                     }
                 }
             }
@@ -1599,7 +1605,7 @@ bool KisResourceCacheDb::addTags(KisResourceStorageSP storage, QString resourceT
     } else {
         QSqlDatabase::database().rollback();
     }
-    return true;
+    return success;
 }
 
 bool KisResourceCacheDb::registerStorageType(const KisResourceStorage::StorageType storageType)
