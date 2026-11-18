@@ -180,6 +180,14 @@ QSqlError createDatabase(const QString &location)
             warnDbMigration << "Could not connect to resource cache database";
             return db.lastError();
         }
+
+        {
+            QSqlQuery pragmaQuery(db);
+            pragmaQuery.exec("PRAGMA journal_mode = WAL;");
+            pragmaQuery.exec("PRAGMA synchronous = NORMAL;");
+            pragmaQuery.exec("PRAGMA cache_size = -8000;");
+            pragmaQuery.exec("PRAGMA temp_store = MEMORY;");
+        }
     } else {
         db = QSqlDatabase::database();
     }
@@ -379,6 +387,14 @@ QSqlError createDatabase(const QString &location)
     KisUsageLogger::log(QString("Creating database from scratch (%1, %2).")
                         .arg(oldSchemaVersionNumber.toString().isEmpty() ? QString("database didn't exist") : ("old schema version: " + oldSchemaVersionNumber.toString()))
                         .arg("new schema version: " + newSchemaVersionNumber.toString()));
+
+    if (!dbTables.isEmpty()) {
+        QSqlQuery dropQuery(db);
+        dropQuery.exec("PRAGMA foreign_keys = OFF;");
+        Q_FOREACH (const QString &tbl, dbTables) {
+            dropQuery.exec(QString("DROP TABLE IF EXISTS %1;").arg(tbl));
+        }
+    }
 
     KisDatabaseTransactionLock transactionLock(QSqlDatabase::database());
 
@@ -1251,7 +1267,11 @@ bool KisResourceCacheDb::addResources(KisResourceStorageSP storage, QString reso
             }
         }
     }
-    QSqlDatabase::database().commit();
+    if (success) {
+        QSqlDatabase::database().commit();
+    } else {
+        QSqlDatabase::database().rollback();
+    }
     return true;
 }
 
@@ -1574,7 +1594,11 @@ bool KisResourceCacheDb::addTags(KisResourceStorageSP storage, QString resourceT
             }
         }
     }
-    QSqlDatabase::database().commit();
+    if (success) {
+        QSqlDatabase::database().commit();
+    } else {
+        QSqlDatabase::database().rollback();
+    }
     return true;
 }
 
@@ -2189,7 +2213,11 @@ bool KisResourceCacheDb::synchronizeStorage(KisResourceStorageSP storage)
         }
     }
 
-    QSqlDatabase::database().commit();
+    if (success) {
+        QSqlDatabase::database().commit();
+    } else {
+        QSqlDatabase::database().rollback();
+    }
     debugResource << "Synchronizing the storages took" << t.elapsed() << "milliseconds for" << storage->location();
 
     return success;

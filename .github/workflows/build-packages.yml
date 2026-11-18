@@ -13,13 +13,13 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   linux-appimage:
     name: Linux AppImage
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    timeout-minutes: 90
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -151,7 +151,7 @@ jobs:
   windows-installer:
     name: Windows installer
     runs-on: windows-2022
-    timeout-minutes: 360
+    timeout-minutes: 90
     env:
       BRANDING: RLStudio
       CI_PROJECT_DIR: ${{ github.workspace }}
@@ -181,36 +181,31 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install CMake and Ninja
+      - name: Install CMake, Ninja and ccache
         shell: pwsh
         run: |
           choco install cmake --version=3.31.6 --yes --allow-downgrade
-          choco install ninja --yes
+          choco install ninja ccache --yes
 
       - name: Install LLVM MinGW toolchain
         shell: pwsh
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "llvm-mingw.zip"
           $root = "C:\llvm-mingw"
-          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/20251118/llvm-mingw-20251118-ucrt-x86_64.zip" -OutFile $archive
+          try {
+            $release = (Invoke-RestMethod "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest").tag_name
+          } catch {
+            $release = "20241118"
+          }
+          if (-not $release) { $release = "20241118" }
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$release/llvm-mingw-$release-ucrt-x86_64.zip"
+          Invoke-WebRequest $url -OutFile $archive
           Expand-Archive -LiteralPath $archive -DestinationPath $root -Force
           $toolchain = Get-ChildItem -LiteralPath $root -Directory | Select-Object -First 1
           if (-not $toolchain) { throw "LLVM MinGW archive did not contain a toolchain directory" }
           Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $toolchain.FullName "bin")
           Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $toolchain.FullName "x86_64-w64-mingw32\bin")
-
-      - name: Install ccache
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP "ccache.zip"
-          $install = Join-Path $env:RUNNER_TEMP "ccache"
-          Invoke-WebRequest "https://github.com/ccache/ccache/releases/download/v4.14.3/ccache-4.14.3-windows-x86_64.zip" -OutFile $archive
-          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualHash -ne "c845c3d65be81954c75659145a522a793a27586bf940c5dcfe18af33fa1a67dd") { throw "ccache archive SHA256 mismatch" }
-          Expand-Archive -LiteralPath $archive -DestinationPath $install -Force
-          $ccacheExe = Get-ChildItem -LiteralPath $install -Recurse -Filter "ccache.exe" | Select-Object -First 1
-          if (-not $ccacheExe) { throw "ccache.exe was not found in the release archive" }
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value $ccacheExe.DirectoryName
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "LLVM_MINGW_DIR=$($toolchain.FullName)"
 
       - name: Prepare dependencies and build installer
         shell: pwsh
@@ -223,8 +218,10 @@ jobs:
           .\venv\Scripts\python.exe -u krita-deps-management\tools\replace-branch-in-seed-file.py krita-deps-management\latest\krita-deps.yml -p -o branch-corrected-deps.yml -d master
           .\venv\Scripts\python.exe -u krita-deps-management\tools\generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
           New-Item -ItemType Directory -Force -Path $env:KDECI_CACHE_PATH, $env:KDECI_CC_CACHE | Out-Null
-          $env:PATH = "C:\llvm-mingw\llvm-mingw-20251118-ucrt-x86_64\bin;C:\llvm-mingw\llvm-mingw-20251118-ucrt-x86_64\x86_64-w64-mingw32\bin;$env:PATH"
-          .\venv\Scripts\python.exe -u krita-deps-management\ci-utilities\run-ci-build.py --project $env:CI_PROJECT_NAME --branch main --platform Windows/Qt5/Shared --skip-publishing
+          if ($env:LLVM_MINGW_DIR) {
+            $env:PATH = "$env:LLVM_MINGW_DIR\bin;$env:LLVM_MINGW_DIR\x86_64-w64-mingw32\bin;$env:PATH"
+          }
+          .\venv\Scripts\python.exe -u krita-deps-management\ci-utilities\run-ci-build.py --project $env:CI_PROJECT_NAME --branch master --platform Windows/Qt5/Shared --skip-publishing
           .\venv\Scripts\python.exe -u build-tools\ci-scripts\build-windows-package.py --skip-debug-package --build-installers
           $installer = Get-ChildItem -File "*-setup.exe" | Select-Object -First 1
           if (-not $installer) { throw "Windows installer was not produced" }
@@ -242,7 +239,7 @@ jobs:
   macos-disk-image:
     name: macOS disk image
     runs-on: macos-15
-    timeout-minutes: 360
+    timeout-minutes: 90
     env:
       BRANDING: RLStudio
       CI_PROJECT_DIR: ${{ github.workspace }}
@@ -286,7 +283,7 @@ jobs:
           python3 -u krita-deps-management/tools/generate-deps-file.py -s branch-corrected-deps.yml -o .kde-ci.yml
           mkdir -p "$KDECI_CACHE_PATH" "$KDECI_CC_CACHE"
           unset VIRTUAL_ENV
-          python3 -u krita-deps-management/ci-utilities/run-ci-build.py --project "$CI_PROJECT_NAME" --branch main --platform MacOS/Qt5/Shared --skip-publishing
+          python3 -u krita-deps-management/ci-utilities/run-ci-build.py --project "$CI_PROJECT_NAME" --branch master --platform MacOS/Qt5/Shared --skip-publishing
           mkdir -p _dmg
           python3 -u packaging/macos/macos-deploy.py --install-dir ./_install --output-dir "$GITHUB_WORKSPACE/_dmg" --krita-source "$GITHUB_WORKSPACE"
           app_bundle="$(find _dmg -maxdepth 1 -type d -name '*.app' -print -quit)"

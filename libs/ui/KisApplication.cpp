@@ -452,6 +452,7 @@ bool KisApplication::registerResources()
 
     if (!KisResourceCacheDb::initialize(databaseLocation)) {
         QMessageBox::critical(qApp->activeWindow(), i18nc("@title:window", "Krita: Fatal error"), i18n("%1\n\nKrita will quit now.", KisResourceCacheDb::lastError()));
+        return false;
     }
 
     KisResourceLocator::LocatorError r = KisResourceLocator::instance()->initialize(KoResourcePaths::getApplicationRoot() + "/share/krita");
