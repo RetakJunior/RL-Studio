@@ -9,6 +9,8 @@
 
 #include <QDebug>
 
+#include <cmath>
+
 namespace KoColorimetryUtils
 {
 
