@@ -57,6 +57,7 @@ pypi_package/src/*.egg-info/
 *.includes
 *.gdb_history
 .directory
+!krita/data/templates/**/.directory
 .DS_Store
 .idea/
 .vscode/
